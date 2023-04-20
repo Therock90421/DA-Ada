@@ -741,6 +741,11 @@ _C.CUDNN_BENCHMARK = False
 # Set to 0 to disable.
 _C.VIS_PERIOD = 0
 
+##########################
+# Learnable prompt config
+_C.LEARNABLE_PROMPT = CN()
+_C.LEARNABLE_PROMPT.CTX_SIZE = 8
+##########################
 # global config is for quick hack purposes.
 # You can set them in command line or config files,
 # and access it with:

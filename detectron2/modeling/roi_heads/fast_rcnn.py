@@ -400,6 +400,7 @@ class FastRCNNOutputLayers(nn.Module):
         bg_cls_loss_weight: None,
         multiply_rpn_score: tuple = (False, False),
         openset_test: None,
+        ctx_size: int = 8,
     ):
         """
         NOTE: this interface is experimental.
@@ -451,10 +452,12 @@ class FastRCNNOutputLayers(nn.Module):
             # learnable prompt embeddings
             self.clip_model, self.preprocess = clip.load('RN50', 'cuda', jit=False)
             self.clip_model.eval()
+            self.ctx_size = ctx_size
+
             for params in self.clip_model.parameters():
                 params.requires_grad_(False)
             self.DAHead = DAPromptHead(('person', 'rider', 'car', 'truck', 'bus', 'train', 'motorcycle',
-           'bicycle'), self.clip_model)
+           'bicycle'), self.clip_model, self.ctx_size)
             #######################################
 
             # class embedding
@@ -535,7 +538,8 @@ class FastRCNNOutputLayers(nn.Module):
             "bg_cls_loss_weight"    : cfg.MODEL.CLIP.BG_CLS_LOSS_WEIGHT,
             "multiply_rpn_score"    : (cfg.MODEL.CLIP.MULTIPLY_RPN_SCORE, cfg.MODEL.CLIP.VIS),
             "openset_test"          : (cfg.MODEL.CLIP.OPENSET_TEST_NUM_CLASSES, cfg.MODEL.CLIP.OPENSET_TEST_TEXT_EMB_PATH, \
-                                       cfg.MODEL.CLIP.CLSS_TEMP, cfg.MODEL.CLIP.FOCAL_SCALED_LOSS)
+                                       cfg.MODEL.CLIP.CLSS_TEMP, cfg.MODEL.CLIP.FOCAL_SCALED_LOSS),
+            "ctx_size"              : cfg.LEARNABLE_PROMPT.CTX_SIZE
             # fmt: on
         }
 

@@ -34,7 +34,7 @@ class TextEncoder(nn.Module):
 
 class PromptLearner(nn.Module):
 
-    def __init__(self, classnames, clip_model, ctx=16):
+    def __init__(self, classnames, clip_model, ctx=8):
         super().__init__()
         n_cls = len(classnames)    # number of classes
         n_ctx_di = ctx             # number of context words in domain invariant part
@@ -125,7 +125,7 @@ class PromptLearner(nn.Module):
 
 class DAPromptHead(nn.Module):
 
-    def __init__(self, classnames, clip_model, ctx=16):
+    def __init__(self, classnames, clip_model, ctx=8):
         super().__init__()
         self.prompt_learner = PromptLearner(classnames, clip_model,ctx)
         self.tokenized_prompts = self.prompt_learner.tokenized_prompts
