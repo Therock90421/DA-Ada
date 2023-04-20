@@ -572,13 +572,12 @@ class FastRCNNOutputLayers(nn.Module):
                 ##########################################
                 # learnable prompt embeddings
                 text_embedding = self.DAHead.get_embedding() #[domains * (cls), 1024]
+
                 #text_embedding = text_embedding / text_embedding.norm(dim=1, keepdim=True) #正则化
                 text_embedding = F.normalize(text_embedding, p=2.0, dim=1)
                 da_cls_scores = normalized_x @ text_embedding.t()
                 da_cls_scores_source = da_cls_scores[:, :self.num_classes]
                 da_cls_scores_target = da_cls_scores[:, self.num_classes:]
-                print(cls_scores.shape, da_cls_scores_source.shape, da_cls_scores_target.shape)
-                quit()
 
             
             # background class (zero embeddings)
@@ -586,7 +585,13 @@ class FastRCNNOutputLayers(nn.Module):
             if self.use_bias:
                 bg_score += self.cls_bg_score.bias
 
-            scores = torch.cat((cls_scores, bg_score), dim=1)
+            #scores = torch.cat((cls_scores, bg_score), dim=1)
+            da_cls_scores_source = torch.cat((da_cls_scores_source, bg_score), dim=1)
+            da_cls_scores_target = torch.cat((da_cls_scores_target, bg_score), dim=1)
+            scores = torch.cat((da_cls_scores_source, da_cls_scores_target), dim=1)    
+            #scores = torch.cat((cls_scores, bg_score), dim=1)
+            #scores = torch.cat((scores, scores), dim=1)
+
             scores = scores / self.temperature
         # regular classifier
         else:  
@@ -596,7 +601,7 @@ class FastRCNNOutputLayers(nn.Module):
         proposal_deltas = self.bbox_pred(x)
         return scores, proposal_deltas
 
-    def losses(self, predictions, proposals):
+    def losses(self, predictions, proposals, is_source = False):
         """
         Args:
             predictions: return values of :meth:`forward()`.
@@ -607,7 +612,18 @@ class FastRCNNOutputLayers(nn.Module):
         Returns:
             Dict[str, Tensor]: dict of losses
         """
+        # scores: [*, domains * (cls + 1)]
         scores, proposal_deltas = predictions
+        #####################################
+        N, D_C = scores.shape
+        C = int(D_C / 2)
+        score_across_domains = scores
+        score_source = scores[:, :C]
+        score_target = scores[:, C:]
+        if is_source:
+            scores = score_source
+        else:
+            scores = score_target
 
         # parse classification outputs
         gt_classes = (
@@ -635,6 +651,12 @@ class FastRCNNOutputLayers(nn.Module):
             self.cls_loss_weight = self.cls_loss_weight.to(scores.device)
         if self.focal_scaled_loss is not None:
             loss_cls = self.focal_loss(scores, gt_classes, gamma=self.focal_scaled_loss)
+            ###############################
+            # train learnable prompt embeddings
+            if is_source:
+                loss_across_domains = self.focal_loss(score_across_domains, gt_classes, gamma=self.focal_scaled_loss)
+                loss_target_domain = self.focal_loss(score_target, gt_classes, gamma=self.focal_scaled_loss)
+
         else:    
             loss_cls = cross_entropy(scores, gt_classes, reduction="mean") if self.cls_loss_weight is None else \
                        cross_entropy(scores, gt_classes, reduction="mean", weight=self.cls_loss_weight)
@@ -644,6 +666,9 @@ class FastRCNNOutputLayers(nn.Module):
                 proposal_boxes, gt_boxes, proposal_deltas, gt_classes
             ),
         }
+        if is_source:
+            losses["loss_across_domains"] = loss_across_domains
+            losses["loss_target_domain"] = loss_target_domain
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
 
     def focal_loss(self, inputs, targets, gamma=0.5, reduction="mean"):
@@ -725,7 +750,7 @@ class FastRCNNOutputLayers(nn.Module):
         # in minibatch (2) are given equal influence.
         return loss_box_reg / max(gt_classes.numel(), 1.0)  # return 0 if empty
 
-    def inference(self, predictions: Tuple[torch.Tensor, torch.Tensor], proposals: List[Instances]):
+    def inference(self, predictions: Tuple[torch.Tensor, torch.Tensor], proposals: List[Instances], is_source = False):
         """
         Args:
             predictions: return values of :meth:`forward()`.
@@ -736,6 +761,16 @@ class FastRCNNOutputLayers(nn.Module):
             list[Instances]: same as `fast_rcnn_inference`.
             list[Tensor]: same as `fast_rcnn_inference`.
         """
+        ### scores: [*, domains * (cls + 1)]
+        scores, proposal_deltas = predictions
+        N, D_C = scores.shape
+        C = int(D_C / 2)
+        if is_source:
+            scores = scores[:, :C]
+        else:
+            scores = scores[:, C:]
+        predictions = (scores, proposal_deltas)
+        ##########################################
         boxes = self.predict_boxes(predictions, proposals)
         scores = self.predict_probs(predictions, proposals)
         image_shapes = [x.image_size for x in proposals]

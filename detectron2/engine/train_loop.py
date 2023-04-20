@@ -394,6 +394,19 @@ class DASimpleTrainer(TrainerBase):
         """
         assert self.model.training, "[SimpleTrainer] model was changed to eval mode!"
         start = time.perf_counter()
+        ####################################
+        # After pre-trained, freeze the model's parameters and conduct prompt tuning
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                param.requires_grad = False
+        for name, param in self.model.named_parameters():
+            if name == 'roi_heads.box_predictor.DAHead.prompt_learner.ctx_di' or name == 'roi_heads.box_predictor.DAHead.prompt_learner.ctx_ds':
+                param.requires_grad = True
+        #print('learning layers:')
+        #for name, param in self.model.named_parameters():
+        #    if param.requires_grad:
+        #        print(name)
+        ####################################
         """
         If you want to do something with the data, you can wrap the dataloader.
         """
@@ -404,8 +417,9 @@ class DASimpleTrainer(TrainerBase):
         """
         If you want to do something with the losses, you can wrap the model.
         """
-        torch.autograd.set_detect_anomaly(True)
-        loss_dict_s = self.model(data_s)
+        #torch.autograd.set_detect_anomaly(True)
+        #loss_dict_s = self.model(data_s)
+        loss_dict_s = self.model(data_s, is_source = True)
         import math
         if math.isnan(loss_dict_s['loss_dis_0']) or math.isnan(loss_dict_s['loss_box_reg']):
             print('loss_dis_0 or loss_box_reg is nan!')
@@ -416,7 +430,7 @@ class DASimpleTrainer(TrainerBase):
             #            print('aaaaaaaa')
             
         del loss_dict_s['loss_dis_1']
-        loss_dict_t = self.model(data_t)
+        loss_dict_t = self.model(data_t, is_source = False)
         del loss_dict_t['loss_dis_0']
         del loss_dict_t['loss_cls']
         del loss_dict_t['loss_box_reg']
@@ -437,8 +451,12 @@ class DASimpleTrainer(TrainerBase):
         wrap the optimizer with your custom `zero_grad()` method.
         """
         self.optimizer.zero_grad()
-        with torch.autograd.detect_anomaly():
-            losses.backward()
+        #with torch.autograd.detect_anomaly():
+        losses.requires_grad_(True)
+        losses.backward()
+        #for name, parms in self.model.named_parameters():
+        #    if parms.requires_grad:
+        #        print('-->name:', name, '-->grad_requirs:',parms.requires_grad,' -->grad_value:',parms.grad)
         loss_dict = dict(loss_dict_s, **loss_dict_t)
 
         self._write_metrics(loss_dict, data_time)

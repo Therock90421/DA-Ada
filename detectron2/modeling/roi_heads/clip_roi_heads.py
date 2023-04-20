@@ -113,12 +113,11 @@ class CLIPRes5ROIHeads(ROIHeads):
         x = self.pooler(features, boxes)
         return backbone_res5(x)
 
-    def forward(self, images, features, proposals, targets=None, res5=None, attnpool=None):
+    def forward(self, images, features, proposals, targets=None, res5=None, attnpool=None, is_source = False):
         """
         See :meth:`ROIHeads.forward`.
         """
         del images
-
         if self.training:
             assert targets
             proposals = self.label_and_sample_proposals(proposals, targets)
@@ -130,13 +129,14 @@ class CLIPRes5ROIHeads(ROIHeads):
         )
         if attnpool:  # att pooling
             att_feats = attnpool(box_features)
+            #predictions = self.box_predictor(att_feats)
             predictions = self.box_predictor(att_feats)
         else: # mean pooling
             predictions = self.box_predictor(box_features.mean(dim=[2, 3]))
 
         if self.training:
             del features
-            losses = self.box_predictor.losses(predictions, proposals)
+            losses = self.box_predictor.losses(predictions, proposals, is_source)
             if self.mask_on:
                 proposals, fg_selection_masks = select_foreground_proposals(
                     proposals, self.num_classes
@@ -150,7 +150,8 @@ class CLIPRes5ROIHeads(ROIHeads):
                 losses.update(self.mask_head(mask_features, proposals))
             return [], losses
         else:
-            pred_instances, _ = self.box_predictor.inference(predictions, proposals)
+            #pred_instances, _ = self.box_predictor.inference(predictions, proposals)
+            pred_instances, _ = self.box_predictor.inference(predictions, proposals, is_source)
             pred_instances = self.forward_with_given_boxes(features, pred_instances, res5)
             return pred_instances, {}
 

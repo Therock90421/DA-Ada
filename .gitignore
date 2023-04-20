@@ -9,6 +9,7 @@ pretrained_ckpt
 datasets/coco
 datasets/lvis
 datasets/cifar-10-batches-py
+datasets
 
 *.png
 *.json
