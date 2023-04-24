@@ -577,7 +577,6 @@ class FastRCNNOutputLayers(nn.Module):
                 # learnable prompt embeddings
                 text_embedding = self.DAHead.get_embedding() #[domains * (cls), 1024]
 
-                #text_embedding = text_embedding / text_embedding.norm(dim=1, keepdim=True) #正则化
                 text_embedding = F.normalize(text_embedding, p=2.0, dim=1)
                 da_cls_scores = normalized_x @ text_embedding.t()
                 da_cls_scores_source = da_cls_scores[:, :self.num_classes]
@@ -592,9 +591,11 @@ class FastRCNNOutputLayers(nn.Module):
             #scores = torch.cat((cls_scores, bg_score), dim=1)
             da_cls_scores_source = torch.cat((da_cls_scores_source, bg_score), dim=1)
             da_cls_scores_target = torch.cat((da_cls_scores_target, bg_score), dim=1)
-            scores = torch.cat((da_cls_scores_source, da_cls_scores_target), dim=1)    
-            #scores = torch.cat((cls_scores, bg_score), dim=1)
-            #scores = torch.cat((scores, scores), dim=1)
+            da_scores = torch.cat((da_cls_scores_source, da_cls_scores_target), dim=1)   
+            da_scores = da_scores / self.temperature 
+            
+            scores = torch.cat((cls_scores, bg_score), dim=1)
+            scores = torch.cat((scores, scores), dim=1)
 
             scores = scores / self.temperature
         # regular classifier
@@ -603,7 +604,7 @@ class FastRCNNOutputLayers(nn.Module):
         
         # box regression
         proposal_deltas = self.bbox_pred(x)
-        return scores, proposal_deltas
+        return scores, proposal_deltas, da_scores
 
     def losses(self, predictions, proposals, is_source = False):
         """
@@ -617,7 +618,9 @@ class FastRCNNOutputLayers(nn.Module):
             Dict[str, Tensor]: dict of losses
         """
         # scores: [*, domains * (cls + 1)]
-        scores, proposal_deltas = predictions
+        scores, proposal_deltas, da_scores = predictions
+        pseudo_scores = scores
+        scores = da_scores
         #####################################
         N, D_C = scores.shape
         C = int(D_C / 2)
@@ -673,6 +676,16 @@ class FastRCNNOutputLayers(nn.Module):
         if is_source:
             losses["loss_across_domains"] = loss_across_domains
             losses["loss_target_domain"] = loss_target_domain
+        # pseudo loss
+        if not is_source:
+            pseudo_scores = pseudo_scores[:, C:] 
+            pseudo_label = torch.softmax(pseudo_scores, dim=-1).detach()
+            max_probs, label_p = torch.max(pseudo_label, dim=-1)
+            mask = max_probs.ge(0.5).float()
+            C_label_p = label_p + C
+            losses['loss_pseudo_target_domain'] = (F.cross_entropy(
+                    score_target, label_p, reduction="none") * mask).sum() / mask.sum()
+
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
 
     def focal_loss(self, inputs, targets, gamma=0.5, reduction="mean"):
@@ -754,7 +767,7 @@ class FastRCNNOutputLayers(nn.Module):
         # in minibatch (2) are given equal influence.
         return loss_box_reg / max(gt_classes.numel(), 1.0)  # return 0 if empty
 
-    def inference(self, predictions: Tuple[torch.Tensor, torch.Tensor], proposals: List[Instances], is_source = False):
+    def inference(self, predictions: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], proposals: List[Instances], is_source = False):
         """
         Args:
             predictions: return values of :meth:`forward()`.
@@ -766,7 +779,10 @@ class FastRCNNOutputLayers(nn.Module):
             list[Tensor]: same as `fast_rcnn_inference`.
         """
         ### scores: [*, domains * (cls + 1)]
-        scores, proposal_deltas = predictions
+        #scores, proposal_deltas = predictions
+        scores, proposal_deltas, da_scores = predictions
+        pseudo_scores = scores
+        scores = da_scores
         N, D_C = scores.shape
         C = int(D_C / 2)
         if is_source:
