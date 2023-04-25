@@ -458,6 +458,7 @@ class FastRCNNOutputLayers(nn.Module):
                 params.requires_grad_(False)
             self.DAHead = DAPromptHead(('person', 'rider', 'car', 'truck', 'bus', 'train', 'motorcycle',
            'bicycle'), self.clip_model, self.ctx_size)
+            self.mse = nn.MSELoss()
             #######################################
 
             # class embedding
@@ -582,6 +583,15 @@ class FastRCNNOutputLayers(nn.Module):
                 da_cls_scores_source = da_cls_scores[:, :self.num_classes]
                 da_cls_scores_target = da_cls_scores[:, self.num_classes:]
 
+                # EMA embeddings
+                text_embedding_ema = self.DAHead.get_embedding_ema().detach() #[domains * (cls), 1024]
+
+                text_embedding_ema = F.normalize(text_embedding_ema, p=2.0, dim=1)
+                ema_cls_scores = normalized_x @ text_embedding_ema.t()
+                ema_cls_scores_source = ema_cls_scores[:, :self.num_classes]
+                ema_cls_scores_target = ema_cls_scores[:, self.num_classes:]
+
+
             
             # background class (zero embeddings)
             bg_score = self.cls_bg_score(normalized_x)
@@ -593,6 +603,12 @@ class FastRCNNOutputLayers(nn.Module):
             da_cls_scores_target = torch.cat((da_cls_scores_target, bg_score), dim=1)
             da_scores = torch.cat((da_cls_scores_source, da_cls_scores_target), dim=1)   
             da_scores = da_scores / self.temperature 
+
+            #EMA scores
+            ema_cls_scores_source = torch.cat((ema_cls_scores_source, bg_score), dim=1)
+            ema_cls_scores_target = torch.cat((ema_cls_scores_target, bg_score), dim=1)
+            ema_scores = torch.cat((ema_cls_scores_source, ema_cls_scores_target), dim=1)   
+            ema_scores = ema_scores / self.temperature
             
             scores = torch.cat((cls_scores, bg_score), dim=1)
             scores = torch.cat((scores, scores), dim=1)
@@ -604,7 +620,7 @@ class FastRCNNOutputLayers(nn.Module):
         
         # box regression
         proposal_deltas = self.bbox_pred(x)
-        return scores, proposal_deltas, da_scores
+        return scores, proposal_deltas, da_scores, ema_scores
 
     def losses(self, predictions, proposals, is_source = False):
         """
@@ -618,7 +634,7 @@ class FastRCNNOutputLayers(nn.Module):
             Dict[str, Tensor]: dict of losses
         """
         # scores: [*, domains * (cls + 1)]
-        scores, proposal_deltas, da_scores = predictions
+        scores, proposal_deltas, da_scores, ema_scores = predictions
         pseudo_scores = scores
         scores = da_scores
         #####################################
@@ -631,6 +647,16 @@ class FastRCNNOutputLayers(nn.Module):
             scores = score_source
         else:
             scores = score_target
+        
+        # EMA logits
+        ema_score_across_domains = ema_scores
+        ema_score_source = ema_scores[:, :C]
+        ema_score_target = ema_scores[:, C:]
+        if is_source:
+            ema_scores = ema_score_source
+        else:
+            ema_scores = ema_score_target
+        loss_ema = 10 * self.mse(scores, ema_scores)
 
         # parse classification outputs
         gt_classes = (
@@ -676,6 +702,7 @@ class FastRCNNOutputLayers(nn.Module):
         if is_source:
             losses["loss_across_domains"] = loss_across_domains
             losses["loss_target_domain"] = loss_target_domain
+            losses["loss_ema_source"] = loss_ema
         # pseudo loss
         if not is_source:
             pseudo_scores = pseudo_scores[:, C:] 
@@ -685,6 +712,11 @@ class FastRCNNOutputLayers(nn.Module):
             C_label_p = label_p + C
             losses['loss_pseudo_target_domain'] = (F.cross_entropy(
                     score_target, label_p, reduction="none") * mask).sum() / mask.sum()
+            #losses['loss_pseudo_across_domain'] = (F.cross_entropy(
+            #        score_across_domains, C_label_p, reduction="none") * mask).sum() / mask.sum()
+            #losses['loss_pseudo_source_domain'] = (F.cross_entropy(
+            #        score_source, label_p, reduction="none") * mask).sum() / mask.sum()
+            losses["loss_ema_target"] = loss_ema
 
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
 
@@ -767,7 +799,7 @@ class FastRCNNOutputLayers(nn.Module):
         # in minibatch (2) are given equal influence.
         return loss_box_reg / max(gt_classes.numel(), 1.0)  # return 0 if empty
 
-    def inference(self, predictions: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], proposals: List[Instances], is_source = False):
+    def inference(self, predictions: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], proposals: List[Instances], is_source = False):
         """
         Args:
             predictions: return values of :meth:`forward()`.
@@ -780,7 +812,7 @@ class FastRCNNOutputLayers(nn.Module):
         """
         ### scores: [*, domains * (cls + 1)]
         #scores, proposal_deltas = predictions
-        scores, proposal_deltas, da_scores = predictions
+        scores, proposal_deltas, da_scores, ema_scores = predictions
         pseudo_scores = scores
         scores = da_scores
         N, D_C = scores.shape

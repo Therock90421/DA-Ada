@@ -458,6 +458,7 @@ class DASimpleTrainer(TrainerBase):
         #    if parms.requires_grad:
         #        print('-->name:', name, '-->grad_requirs:',parms.requires_grad,' -->grad_value:',parms.grad)
         loss_dict = dict(loss_dict_s, **loss_dict_t)
+        print(loss_dict)
 
         self._write_metrics(loss_dict, data_time)
 
@@ -467,7 +468,18 @@ class DASimpleTrainer(TrainerBase):
         wrap the optimizer with your custom `step()` method. But it is
         suboptimal as explained in https://arxiv.org/abs/2006.15704 Sec 3.2.4
         """
+        self.update_ema_buffer(self.model, 0.99, self.iter)
+
         self.optimizer.step()
+        # EMA update
+
+    # EMA update
+    def update_ema_buffer(self, x, alpha, iteration):
+        alpha = min(1 - 1 / (iteration + 1), alpha)
+        #print(x.roi_heads.box_predictor.DAHead.prompt_learner.ctx_di)
+        #print(x.roi_heads.box_predictor.DAHead.prompt_learner.ctx_di_ema)
+        x.roi_heads.box_predictor.DAHead.prompt_learner.ctx_di_ema.mul_(alpha).add_(1 - alpha, x.roi_heads.box_predictor.DAHead.prompt_learner.ctx_di)
+        x.roi_heads.box_predictor.DAHead.prompt_learner.ctx_ds_ema.mul_(alpha).add_(1 - alpha, x.roi_heads.box_predictor.DAHead.prompt_learner.ctx_ds)
 
     def _write_metrics(
         self,

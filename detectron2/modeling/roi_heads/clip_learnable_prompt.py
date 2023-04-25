@@ -57,12 +57,17 @@ class PromptLearner(nn.Module):
         nn.init.normal_(di_vectors, std=0.02)
         print(f'Number of domain-invariant context words (tokens): {n_ctx_di}')       
         self.ctx_di = nn.Parameter(di_vectors)
+        # EMA
+        self.register_buffer('ctx_di_ema', di_vectors.clone().detach())
+
 
         print('Initializing a domain-specific context')
         ds_vectors = torch.empty(n_dms, n_ctx_ds, ctx_dim, dtype=dtype).to(torch.device("cuda"))
         nn.init.normal_(ds_vectors, std=0.02)
         print(f'Number of domain-specific context words (tokens): {n_ctx_ds}')
         self.ctx_ds = nn.Parameter(ds_vectors)
+        # EMA
+        self.register_buffer('ctx_ds_ema', ds_vectors.clone().detach())
 
         classnames = [name.replace('_', ' ') for name in classnames]
         name_lens = [len(_tokenizer.encode(name)) for name in classnames]
@@ -119,8 +124,26 @@ class PromptLearner(nn.Module):
             ctx,    # [n_dms * n_cls, 16, 512]
             suffix  # [n_cls, *, 512]
         ], dim=1)
+
+        # EMA
+        ctx_di_ema = self.ctx_di_ema        # [8, 512]
+        ctx_ds_ema = self.ctx_ds_ema        # [n_dms, 8, 512]
+        if ctx_di_ema.dim() == 2:
+            ctx_di_ema = ctx_di_ema.unsqueeze(0).expand(self.n_dms, -1, -1) # [n_dms, 8, 512]
+            ctx_di_ema = ctx_di_ema.unsqueeze(1).expand(-1, self.n_cls, -1, -1) # [n_dms, n_cls, 8, 512]
+        else: #ctx_di is class-wise
+            ctx_di_ema = ctx_di_ema.unsqueeze(0).expand(self.n_dms, -1, -1,-1)  # [n_dms, n_cls, 8, 512]
+
+        ctx_ds_ema = ctx_ds_ema.unsqueeze(1).expand(-1, self.n_cls, -1, -1) # [n_dms, n_cls, 8, 512]
+
+        ctx_ema = torch.cat([ctx_di_ema, ctx_ds_ema], dim=2).reshape(self.n_dms * self.n_cls, self.n_ctx_di + self.n_ctx_ds, ctx_dim) # [n_dms, n_cls, 16, 512]-> [n_dms * n_cls, 16, 512]
+        prompts_ema = torch.cat([
+            prefix, # [n_cls, 1, 512]
+            ctx_ema,    # [n_dms * n_cls, 16, 512]
+            suffix  # [n_cls, *, 512]
+        ], dim=1)
         
-        return prompts, self.tokenized_prompts
+        return prompts, self.tokenized_prompts, prompts_ema
 
 
 class DAPromptHead(nn.Module):
@@ -137,7 +160,13 @@ class DAPromptHead(nn.Module):
 
     
     def get_embedding(self):
-        prompts, tokenized_prompts = self.prompt_learner()
+        prompts, tokenized_prompts, _ = self.prompt_learner()
+        text_features = self.text_encoder(prompts, tokenized_prompts)
+
+        return text_features.float()
+
+    def get_embedding_ema(self):
+        _, tokenized_prompts, prompts = self.prompt_learner()
         text_features = self.text_encoder(prompts, tokenized_prompts)
 
         return text_features.float()
