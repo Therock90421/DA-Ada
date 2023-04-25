@@ -458,7 +458,6 @@ class DASimpleTrainer(TrainerBase):
         #    if parms.requires_grad:
         #        print('-->name:', name, '-->grad_requirs:',parms.requires_grad,' -->grad_value:',parms.grad)
         loss_dict = dict(loss_dict_s, **loss_dict_t)
-        print(loss_dict)
 
         self._write_metrics(loss_dict, data_time)
 
