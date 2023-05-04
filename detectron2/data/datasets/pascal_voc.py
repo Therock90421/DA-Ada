@@ -50,15 +50,20 @@ def load_voc_instances(dirname: str, split: str, class_names: Union[List[str], T
 
         with PathManager.open(anno_file) as f:
             tree = ET.parse(f)
-
-        r = {
-            "file_name": jpeg_file,
-            "image_id": fileid,
-            #"height": int(tree.findall("./size/height")[0].text),
-            #"width": int(tree.findall("./size/width")[0].text),
-            "height": int(tree.findall("./size/width")[0].text),
-            "width": int(tree.findall("./size/height")[0].text),
-        }
+        if 'city' in dirname:
+            r = {
+                "file_name": jpeg_file,
+                "image_id": fileid,
+                "height": int(tree.findall("./size/width")[0].text),
+                "width": int(tree.findall("./size/height")[0].text),
+            }
+        else:
+            r = {
+                "file_name": jpeg_file,
+                "image_id": fileid,
+                "height": int(tree.findall("./size/height")[0].text),
+                "width": int(tree.findall("./size/width")[0].text),
+            }
         instances = []
 
         for obj in tree.findall("object"):

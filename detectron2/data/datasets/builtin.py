@@ -275,7 +275,7 @@ def register_all_pascal_voc(root):
         ("cityscapes_voc_car_trainval", "cityscapes_voc/VOC2007", "source_trainval"),
         ("cityscapes_voc_car_test", "cityscapes_voc/VOC2007", "test"),
         ("kitti_voc_car_train", "kitti/VOC2007", "train"),
-        ("sim10k_voc_car_train", "sim10k_coco/VOC2007", "train"),
+        ("sim10k_voc_car_train", "sim10k_coco/VOC2012", "train"),
     ]
     for name, dirname, split in SPLITS:
         year = 2007 if "2007" in name else 2012
