@@ -401,6 +401,8 @@ class FastRCNNOutputLayers(nn.Module):
         multiply_rpn_score: tuple = (False, False),
         openset_test: None,
         ctx_size: int = 8,
+        prompt_class: tuple = (None),
+        is_prompt_tuning: bool = False,
     ):
         """
         NOTE: this interface is experimental.
@@ -453,12 +455,13 @@ class FastRCNNOutputLayers(nn.Module):
             self.clip_model, self.preprocess = clip.load('RN50', 'cuda', jit=False)
             self.clip_model.eval()
             self.ctx_size = ctx_size
+            self.is_prompt_tuning = is_prompt_tuning
 
             for params in self.clip_model.parameters():
                 params.requires_grad_(False)
-            self.DAHead = DAPromptHead(('person', 'rider', 'car', 'truck', 'bus', 'train', 'motorcycle',
-           'bicycle'), self.clip_model, self.ctx_size)
-            self.mse = nn.MSELoss()
+            #self.DAHead = DAPromptHead(('person', 'rider', 'car', 'truck', 'bus', 'train', 'motorcycle', 'bicycle'), self.clip_model, self.ctx_size)
+            self.DAHead = DAPromptHead(prompt_class, self.clip_model, self.ctx_size)
+            self.mse = torch.nn.MSELoss(reduction="none")
             #######################################
 
             # class embedding
@@ -540,7 +543,9 @@ class FastRCNNOutputLayers(nn.Module):
             "multiply_rpn_score"    : (cfg.MODEL.CLIP.MULTIPLY_RPN_SCORE, cfg.MODEL.CLIP.VIS),
             "openset_test"          : (cfg.MODEL.CLIP.OPENSET_TEST_NUM_CLASSES, cfg.MODEL.CLIP.OPENSET_TEST_TEXT_EMB_PATH, \
                                        cfg.MODEL.CLIP.CLSS_TEMP, cfg.MODEL.CLIP.FOCAL_SCALED_LOSS),
-            "ctx_size"              : cfg.LEARNABLE_PROMPT.CTX_SIZE
+            "ctx_size"              : cfg.LEARNABLE_PROMPT.CTX_SIZE,
+            "prompt_class"          : cfg.LEARNABLE_PROMPT.CLASS,
+            "is_prompt_tuning"      : cfg.LEARNABLE_PROMPT.TUNING
             # fmt: on
         }
 
@@ -635,8 +640,10 @@ class FastRCNNOutputLayers(nn.Module):
         """
         # scores: [*, domains * (cls + 1)]
         scores, proposal_deltas, da_scores, ema_scores = predictions
-        pseudo_scores = scores
-        scores = da_scores
+        if self.is_prompt_tuning:
+            # if prompt tuning, use origin scores as pseudo labels, and use da_scores as logits
+            pseudo_scores = scores
+            scores = da_scores
         #####################################
         N, D_C = scores.shape
         C = int(D_C / 2)
@@ -649,14 +656,20 @@ class FastRCNNOutputLayers(nn.Module):
             scores = score_target
         
         # EMA logits
-        ema_score_across_domains = ema_scores
-        ema_score_source = ema_scores[:, :C]
-        ema_score_target = ema_scores[:, C:]
-        if is_source:
-            ema_scores = ema_score_source
-        else:
-            ema_scores = ema_score_target
-        loss_ema = 10 * self.mse(scores, ema_scores)
+        #ema_score_across_domains = ema_scores
+        #ema_score_source = ema_scores[:, :C]
+        #ema_score_target = ema_scores[:, C:]
+        #if is_source:
+        #    ema_scores = ema_score_source
+        #else:
+        #    ema_scores = ema_score_target
+        #loss_ema = 10 * self.mse(scores, ema_scores)
+        #loss_ema = self.mse(torch.softmax(scores, dim=1), torch.softmax(ema_scores, dim=1))
+        #soft_label = torch.softmax(ema_scores, dim=-1).detach()
+        #soft_max_probs, soft_label_p = torch.max(soft_label, dim=-1)
+        #soft_mask = soft_max_probs.ge(0.5).float()
+        #loss_ema = (self.mse(torch.softmax(scores, dim=-1), soft_label).sum(dim = -1) * soft_mask).sum() / soft_mask.sum()
+        #loss_ema_target = (F.cross_entropy(score_target, soft_label_p, reduction="none") * soft_mask).sum() / soft_mask.sum()
 
         # parse classification outputs
         gt_classes = (
@@ -684,12 +697,6 @@ class FastRCNNOutputLayers(nn.Module):
             self.cls_loss_weight = self.cls_loss_weight.to(scores.device)
         if self.focal_scaled_loss is not None:
             loss_cls = self.focal_loss(scores, gt_classes, gamma=self.focal_scaled_loss)
-            ###############################
-            # train learnable prompt embeddings
-            if is_source:
-                loss_across_domains = self.focal_loss(score_across_domains, gt_classes, gamma=self.focal_scaled_loss)
-                loss_target_domain = self.focal_loss(score_target, gt_classes, gamma=self.focal_scaled_loss)
-
         else:    
             loss_cls = cross_entropy(scores, gt_classes, reduction="mean") if self.cls_loss_weight is None else \
                        cross_entropy(scores, gt_classes, reduction="mean", weight=self.cls_loss_weight)
@@ -699,24 +706,30 @@ class FastRCNNOutputLayers(nn.Module):
                 proposal_boxes, gt_boxes, proposal_deltas, gt_classes
             ),
         }
-        if is_source:
-            losses["loss_across_domains"] = loss_across_domains
-            losses["loss_target_domain"] = loss_target_domain
-            losses["loss_ema_source"] = loss_ema
-        # pseudo loss
-        if not is_source:
-            pseudo_scores = pseudo_scores[:, C:] 
-            pseudo_label = torch.softmax(pseudo_scores, dim=-1).detach()
-            max_probs, label_p = torch.max(pseudo_label, dim=-1)
-            mask = max_probs.ge(0.5).float()
-            C_label_p = label_p + C
-            losses['loss_pseudo_target_domain'] = (F.cross_entropy(
-                    score_target, label_p, reduction="none") * mask).sum() / mask.sum()
-            #losses['loss_pseudo_across_domain'] = (F.cross_entropy(
-            #        score_across_domains, C_label_p, reduction="none") * mask).sum() / mask.sum()
-            #losses['loss_pseudo_source_domain'] = (F.cross_entropy(
-            #        score_source, label_p, reduction="none") * mask).sum() / mask.sum()
-            losses["loss_ema_target"] = loss_ema
+        #############################################
+        if self.is_prompt_tuning:
+            # train learnable prompt embeddings
+            if is_source:
+                losses["loss_across_domains"] = self.focal_loss(score_across_domains, gt_classes, gamma=self.focal_scaled_loss)
+                losses["loss_target_domain"] = self.focal_loss(score_target, gt_classes, gamma=self.focal_scaled_loss)
+                # source domain do not need teacher
+                #losses["loss_ema_source"] = loss_ema
+            # pseudo loss
+            if not is_source:
+                pseudo_scores = pseudo_scores[:, C:] 
+                pseudo_label = torch.softmax(pseudo_scores, dim=-1).detach()
+                max_probs, label_p = torch.max(pseudo_label, dim=-1)
+                mask = max_probs.ge(0.5).float()
+                C_label_p = label_p + C
+                losses['loss_pseudo_target_domain'] = (F.cross_entropy(
+                        score_target, label_p, reduction="none") * mask).sum() / mask.sum()
+                losses['loss_target_entropy'] = - (pseudo_label * torch.log_softmax(score_target, dim=-1)).sum() / N
+                #losses['loss_pseudo_across_domain'] = (F.cross_entropy(
+                #        score_across_domains, C_label_p, reduction="none") * mask).sum() / mask.sum()
+                #losses['loss_pseudo_source_domain'] = (F.cross_entropy(
+                #        score_source, label_p, reduction="none") * mask).sum() / mask.sum()
+                #losses["loss_ema_target"] = loss_ema
+        ########################################
 
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
 
@@ -815,6 +828,7 @@ class FastRCNNOutputLayers(nn.Module):
         scores, proposal_deltas, da_scores, ema_scores = predictions
         pseudo_scores = scores
         scores = da_scores
+        scores = ema_scores
         N, D_C = scores.shape
         C = int(D_C / 2)
         if is_source:

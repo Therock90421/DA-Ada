@@ -745,6 +745,8 @@ _C.VIS_PERIOD = 0
 # Learnable prompt config
 _C.LEARNABLE_PROMPT = CN()
 _C.LEARNABLE_PROMPT.CTX_SIZE = 8
+_C.LEARNABLE_PROMPT.TUNING = False
+_C.LEARNABLE_PROMPT.CLASS = ('car',)
 ##########################
 # global config is for quick hack purposes.
 # You can set them in command line or config files,

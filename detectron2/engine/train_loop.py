@@ -363,7 +363,7 @@ class DASimpleTrainer(TrainerBase):
     or write your own training loop.
     """
 
-    def __init__(self, model, data_loader_s, data_loader_t, optimizer):
+    def __init__(self, model, data_loader_s, data_loader_t, optimizer, is_prompt_tuning):
         """
         Args:
             model: a torch Module. Takes a data from data_loader and returns a
@@ -387,6 +387,7 @@ class DASimpleTrainer(TrainerBase):
         self._data_loader_iter_s = iter(data_loader_s)
         self._data_loader_iter_t = iter(data_loader_t)
         self.optimizer = optimizer
+        self.is_prompt_tuning = is_prompt_tuning
 
     def run_step(self):
         """
@@ -395,17 +396,22 @@ class DASimpleTrainer(TrainerBase):
         assert self.model.training, "[SimpleTrainer] model was changed to eval mode!"
         start = time.perf_counter()
         ####################################
-        # After pre-trained, freeze the model's parameters and conduct prompt tuning
-        for name, param in self.model.named_parameters():
-            if param.requires_grad:
-                param.requires_grad = False
-        for name, param in self.model.named_parameters():
-            if name == 'roi_heads.box_predictor.DAHead.prompt_learner.ctx_di' or name == 'roi_heads.box_predictor.DAHead.prompt_learner.ctx_ds':
-                param.requires_grad = True
+        if self.is_prompt_tuning:
+            # After pre-trained, freeze the model's parameters and conduct prompt tuning
+            for name, param in self.model.named_parameters():
+                if param.requires_grad:
+                    param.requires_grad = False
+            for name, param in self.model.named_parameters():
+                if name == 'roi_heads.box_predictor.DAHead.prompt_learner.ctx_di' or name == 'roi_heads.box_predictor.DAHead.prompt_learner.ctx_ds':
+                    param.requires_grad = True
+            for name, param in self.model.named_parameters():
+                if 'backbone.attnpool' in name:
+                    param.requires_grad = True
         #print('learning layers:')
         #for name, param in self.model.named_parameters():
         #    if param.requires_grad:
         #        print(name)
+            #quit()
         ####################################
         """
         If you want to do something with the data, you can wrap the dataloader.
@@ -458,6 +464,8 @@ class DASimpleTrainer(TrainerBase):
         #    if parms.requires_grad:
         #        print('-->name:', name, '-->grad_requirs:',parms.requires_grad,' -->grad_value:',parms.grad)
         loss_dict = dict(loss_dict_s, **loss_dict_t)
+        print(loss_dict)
+        quit()
 
         self._write_metrics(loss_dict, data_time)
 

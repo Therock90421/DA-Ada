@@ -777,8 +777,9 @@ class DATrainer(TrainerBase):
         data_loader_s, data_loader_t = self.build_train_loader(cfg)
 
         model = create_ddp_model(model, broadcast_buffers=False)
+        # Added pretrain or prompt tuning option to DASimpleTrainer
         self._trainer = (AMPTrainer if cfg.SOLVER.AMP.ENABLED else DASimpleTrainer)(
-            model, data_loader_s, data_loader_t, optimizer
+            model, data_loader_s, data_loader_t, optimizer, is_prompt_tuning=cfg.LEARNABLE_PROMPT.TUNING
         )
 
         self.scheduler = self.build_lr_scheduler(cfg, optimizer)
