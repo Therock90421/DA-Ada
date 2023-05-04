@@ -271,9 +271,19 @@ def register_all_pascal_voc(root):
         ("foggy_cityscapes_voc_trainval", "foggy_cityscapes_voc/VOC2007", "target_trainval"),
         ("foggy_cityscapes_voc_test", "foggy_cityscapes_voc/VOC2007", "test"),
     ]
+    SingleClassSPLITS = [
+        ("cityscapes_voc_car_trainval", "cityscapes_voc/VOC2007", "source_trainval"),
+        ("cityscapes_voc_car_test", "cityscapes_voc/VOC2007", "test"),
+        ("kitti_voc_car_train", "kitti/VOC2007", "train"),
+        ("sim10k_voc_car_train", "sim10k_coco/VOC2007", "train"),
+    ]
     for name, dirname, split in SPLITS:
         year = 2007 if "2007" in name else 2012
         register_pascal_voc(name, os.path.join(root, dirname), split, year)
+        MetadataCatalog.get(name).evaluator_type = "pascal_voc"
+    for name, dirname, split in SingleClassSPLITS:
+        year = 2007 if "2007" in name else 2012
+        register_pascal_voc(name, os.path.join(root, dirname), split, year, class_names=('car',))
         MetadataCatalog.get(name).evaluator_type = "pascal_voc"
 
 

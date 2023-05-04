@@ -43,8 +43,10 @@ def load_voc_instances(dirname: str, split: str, class_names: Union[List[str], T
     dicts = []
     for fileid in fileids:
         anno_file = os.path.join(annotation_dirname, fileid + ".xml")
-        #jpeg_file = os.path.join(dirname, "JPEGImages", fileid + ".jpg")
-        jpeg_file = os.path.join(dirname, "JPEGImages", fileid + ".png")
+        if 'sim' in dirname:
+            jpeg_file = os.path.join(dirname, "JPEGImages", fileid + ".jpg")
+        else:
+            jpeg_file = os.path.join(dirname, "JPEGImages", fileid + ".png")
 
         with PathManager.open(anno_file) as f:
             tree = ET.parse(f)
@@ -76,9 +78,10 @@ def load_voc_instances(dirname: str, split: str, class_names: Union[List[str], T
             # However, in cityscapes, the annotation of xmin could be 0
             #bbox[0] -= 1.0
             #bbox[1] -= 1.0
-            instances.append(
-                {"category_id": class_names.index(cls), "bbox": bbox, "bbox_mode": BoxMode.XYXY_ABS}
-            )
+            if cls in class_names:
+                instances.append(
+                    {"category_id": class_names.index(cls), "bbox": bbox, "bbox_mode": BoxMode.XYXY_ABS}
+                )
         r["annotations"] = instances
         dicts.append(r)
     return dicts
