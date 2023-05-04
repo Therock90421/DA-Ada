@@ -826,9 +826,10 @@ class FastRCNNOutputLayers(nn.Module):
         ### scores: [*, domains * (cls + 1)]
         #scores, proposal_deltas = predictions
         scores, proposal_deltas, da_scores, ema_scores = predictions
-        pseudo_scores = scores
-        scores = da_scores
-        scores = ema_scores
+        if self.is_prompt_tuning:
+            pseudo_scores = scores
+            scores = da_scores
+            scores = ema_scores
         N, D_C = scores.shape
         C = int(D_C / 2)
         if is_source:
