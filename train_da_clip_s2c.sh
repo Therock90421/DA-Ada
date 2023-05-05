@@ -10,4 +10,4 @@ MODEL.CLIP.BB_RPN_WEIGHTS ./pretrained_ckpt/rpn/rpn_coco_48.pth \
 MODEL.CLIP.TEXT_EMB_PATH ./pretrained_ckpt/concept_emb/cityscapes_car_emb.pth \
 OUTPUT_DIR ./output/s2c \
 LEARNABLE_PROMPT.CTX_SIZE 8 \
-LEARNABLE_PROMPT.TUNING False #True 
+LEARNABLE_PROMPT.TUNING True 
