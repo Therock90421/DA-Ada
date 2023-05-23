@@ -724,10 +724,10 @@ class FastRCNNOutputLayers(nn.Module):
                 losses['loss_pseudo_target_domain'] = (F.cross_entropy(
                         score_target, label_p, reduction="none") * mask).sum() / mask.sum()
                 losses['loss_target_entropy'] = - (pseudo_label * torch.log_softmax(score_target, dim=-1)).sum() / N
-                #losses['loss_pseudo_across_domain'] = (F.cross_entropy(
-                #        score_across_domains, C_label_p, reduction="none") * mask).sum() / mask.sum()
-                #losses['loss_pseudo_source_domain'] = (F.cross_entropy(
-                #        score_source, label_p, reduction="none") * mask).sum() / mask.sum()
+                losses['loss_pseudo_across_domain'] = 0.25 * (F.cross_entropy(
+                        score_across_domains, C_label_p, reduction="none") * mask).sum() / mask.sum()
+                losses['loss_pseudo_source_domain'] = 0.25 * (F.cross_entropy(
+                        score_source, label_p, reduction="none") * mask).sum() / mask.sum()
                 #losses["loss_ema_target"] = loss_ema
         ########################################
 
@@ -829,7 +829,7 @@ class FastRCNNOutputLayers(nn.Module):
         if self.is_prompt_tuning:
             pseudo_scores = scores
             scores = da_scores
-            scores = ema_scores
+            #scores = ema_scores
         N, D_C = scores.shape
         C = int(D_C / 2)
         if is_source:

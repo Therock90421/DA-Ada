@@ -54,6 +54,11 @@ class PromptLearner(nn.Module):
 
         print('Initializing a domain-invariant context')
         di_vectors = torch.empty(n_ctx_di, ctx_dim, dtype=dtype).to(torch.device("cuda"))
+        # only di_vectors
+        #di_vectors = torch.empty(n, ctx_dim, dtype=dtype).to(torch.device("cuda"))
+        # class-specific context
+        #di_vectors = torch.empty(n_cls, n_ctx_di, ctx_dim, dtype=dtype).to(torch.device("cuda"))
+
         nn.init.normal_(di_vectors, std=0.02)
         print(f'Number of domain-invariant context words (tokens): {n_ctx_di}')       
         self.ctx_di = nn.Parameter(di_vectors)
@@ -63,6 +68,11 @@ class PromptLearner(nn.Module):
 
         print('Initializing a domain-specific context')
         ds_vectors = torch.empty(n_dms, n_ctx_ds, ctx_dim, dtype=dtype).to(torch.device("cuda"))
+        # only ds_vectors
+        #ds_vectors = torch.empty(n_dms, n, ctx_dim, dtype=dtype).to(torch.device("cuda"))
+        # class-specific context
+        #ds_vectors = torch.empty(n_dms, n_cls, n_ctx_ds, ctx_dim, dtype=dtype).to(torch.device("cuda"))
+
         nn.init.normal_(ds_vectors, std=0.02)
         print(f'Number of domain-specific context words (tokens): {n_ctx_ds}')
         self.ctx_ds = nn.Parameter(ds_vectors)
@@ -116,9 +126,16 @@ class PromptLearner(nn.Module):
         else: #ctx_di is class-wise
             ctx_di = ctx_di.unsqueeze(0).expand(self.n_dms, -1, -1,-1)  # [n_dms, n_cls, 8, 512]
 
-        ctx_ds = ctx_ds.unsqueeze(1).expand(-1, self.n_cls, -1, -1) # [n_dms, n_cls, 8, 512]
+        if ctx_ds.dim() == 3:
+            ctx_ds = ctx_ds.unsqueeze(1).expand(-1, self.n_cls, -1, -1) # [n_dms, n_cls, 8, 512]
+        else: #ctx_ds is class-wise
+            ctx_ds = ctx_ds
 
         ctx = torch.cat([ctx_di, ctx_ds], dim=2).reshape(self.n_dms * self.n_cls, self.n_ctx_di + self.n_ctx_ds, ctx_dim) # [n_dms, n_cls, 16, 512]-> [n_dms * n_cls, 16, 512]
+        # only di_vectors
+        #ctx = ctx_di.reshape(self.n_dms * self.n_cls, self.n_ctx_di + self.n_ctx_ds, ctx_dim)
+        # only ds_vectors
+        #ctx = ctx_ds.reshape(self.n_dms * self.n_cls, self.n_ctx_di + self.n_ctx_ds, ctx_dim)
         prompts = torch.cat([
             prefix, # [n_cls, 1, 512]
             ctx,    # [n_dms * n_cls, 16, 512]
@@ -134,9 +151,16 @@ class PromptLearner(nn.Module):
         else: #ctx_di is class-wise
             ctx_di_ema = ctx_di_ema.unsqueeze(0).expand(self.n_dms, -1, -1,-1)  # [n_dms, n_cls, 8, 512]
 
-        ctx_ds_ema = ctx_ds_ema.unsqueeze(1).expand(-1, self.n_cls, -1, -1) # [n_dms, n_cls, 8, 512]
-
+        if ctx_ds_ema.dim() == 3:
+            ctx_ds_ema = ctx_ds_ema.unsqueeze(1).expand(-1, self.n_cls, -1, -1) # [n_dms, n_cls, 8, 512]
+        else:
+            ctx_ds_ema = ctx_ds_ema
+            
         ctx_ema = torch.cat([ctx_di_ema, ctx_ds_ema], dim=2).reshape(self.n_dms * self.n_cls, self.n_ctx_di + self.n_ctx_ds, ctx_dim) # [n_dms, n_cls, 16, 512]-> [n_dms * n_cls, 16, 512]
+        # only di_vectors
+        #ctx_ema = ctx_di_ema.reshape(self.n_dms * self.n_cls, self.n_ctx_di + self.n_ctx_ds, ctx_dim)
+        # only ds_vectors
+        #ctx_ema = ctx_ds_ema.reshape(self.n_dms * self.n_cls, self.n_ctx_di + self.n_ctx_ds, ctx_dim)
         prompts_ema = torch.cat([
             prefix, # [n_cls, 1, 512]
             ctx_ema,    # [n_dms * n_cls, 16, 512]

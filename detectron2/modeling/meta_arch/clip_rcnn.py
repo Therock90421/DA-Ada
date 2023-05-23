@@ -309,7 +309,24 @@ class CLIPFastRCNN(nn.Module):
             else:
                 results, _  = self.roi_heads(images, features, proposals, None)
         
-        #visualize_proposals(batched_inputs, proposals, self.input_format)
+        #visualize
+        #from detectron2.utils.visualizer import Visualizer
+        #img = batched_inputs[0]["image"]
+        #img = convert_image_to_rgb(img.permute(1, 2, 0), self.input_format)
+        #v_gt = Visualizer(img, None)
+        #classname = ['person', 'rider', 'car', 'truck', 'bus', 'train', 'motorcycle', 'bicycle']
+        #v_gt_name = ["{} ".format(classname[int(l)]) for l in batched_inputs[0]["instances"].gt_classes.to("cpu")]
+        #v_gt = v_gt.overlay_instances(boxes=batched_inputs[0]["instances"].gt_boxes, labels=v_gt_name)
+        #anno_img = v_gt.get_image()
+        #v_pred = Visualizer(img, None)
+        #v_pred = v_pred.draw_instance_predictions(results[0].to("cpu"), 0.8)
+        #prop_img = v_pred.get_image()
+        #vis_img = np.concatenate((anno_img, prop_img), axis=1)
+        #vis_name = "Left: GT bounding boxes;  Right: Predicted proposals"
+        #f_n = batched_inputs[0]['file_name']
+        #to_save = Image.fromarray(np.array(vis_img, np.uint8))
+        #to_save.save("output/regions/" + f_n.split("/")[-1].split(".")[0] + ".png")
+
         if do_postprocess:
             assert not torch.jit.is_scripting(), "Scripting is not supported for postprocess."
             return CLIPFastRCNN._postprocess(results, batched_inputs)

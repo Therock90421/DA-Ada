@@ -11,7 +11,7 @@ MODEL.CLIP.BB_RPN_WEIGHTS ./pretrained_ckpt/rpn/rpn_coco_48.pth \
 MODEL.CLIP.TEXT_EMB_PATH ./pretrained_ckpt/concept_emb/cityscapes_8_cls_emb.pth \
 MODEL.ROI_HEADS.SOFT_NMS_ENABLED True \
 LEARNABLE_PROMPT.CTX_SIZE 8 \
-LEARNABLE_PROMPT.TUNING True 
+LEARNABLE_PROMPT.TUNING False 
 
 
 

@@ -404,9 +404,9 @@ class DASimpleTrainer(TrainerBase):
             for name, param in self.model.named_parameters():
                 if name == 'roi_heads.box_predictor.DAHead.prompt_learner.ctx_di' or name == 'roi_heads.box_predictor.DAHead.prompt_learner.ctx_ds':
                     param.requires_grad = True
-            for name, param in self.model.named_parameters():
-                if 'backbone.attnpool' in name:
-                    param.requires_grad = True
+            #for name, param in self.model.named_parameters():
+            #    if 'backbone.attnpool' in name:
+            #        param.requires_grad = True
         #print('learning layers:')
         #for name, param in self.model.named_parameters():
         #    if param.requires_grad:
