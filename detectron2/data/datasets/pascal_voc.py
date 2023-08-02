@@ -43,7 +43,7 @@ def load_voc_instances(dirname: str, split: str, class_names: Union[List[str], T
     dicts = []
     for fileid in fileids:
         anno_file = os.path.join(annotation_dirname, fileid + ".xml")
-        if 'sim' in dirname:
+        if 'sim' in dirname or 'pascal' in dirname or 'clipart' in dirname or 'watercolor' in dirname or 'comic' in dirname:
             jpeg_file = os.path.join(dirname, "JPEGImages", fileid + ".jpg")
         else:
             jpeg_file = os.path.join(dirname, "JPEGImages", fileid + ".png")
