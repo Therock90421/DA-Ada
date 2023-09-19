@@ -23,6 +23,7 @@ from .keypoint_head import build_keypoint_head
 from .mask_head import build_mask_head
 
 from .roi_heads import ROI_HEADS_REGISTRY, select_foreground_proposals, ROIHeads
+from ..meta_arch.clip_rcnn import DAFeatDiscriminator
 
 @ROI_HEADS_REGISTRY.register()
 class CLIPRes5ROIHeads(ROIHeads):
@@ -66,6 +67,7 @@ class CLIPRes5ROIHeads(ROIHeads):
         self.mask_on = mask_head is not None
         if self.mask_on:
             self.mask_head = mask_head
+        self.head_dis = DAFeatDiscriminator(2048)
 
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -109,11 +111,17 @@ class CLIPRes5ROIHeads(ROIHeads):
             )
         return ret
 
-    def _shared_roi_transform(self, features, boxes, backbone_res5):
+    def _shared_roi_transform(self, features, boxes, backbone_res5, lora5):
         x = self.pooler(features, boxes)
+        ######################
+        #lora = [lora5(features[0])]
+        #pool2d = nn.AvgPool2d(2)
+        #x_lora = pool2d(self.pooler(lora, boxes))
+        #return backbone_res5(x) + x_lora
         return backbone_res5(x)
 
-    def forward(self, images, features, proposals, targets=None, res5=None, attnpool=None, is_source = False):
+
+    def forward(self, images, features, proposals, targets=None, res5=None, attnpool=None, is_source = False, lora5=None):
         """
         See :meth:`ROIHeads.forward`.
         """
@@ -125,7 +133,7 @@ class CLIPRes5ROIHeads(ROIHeads):
 
         proposal_boxes = [x.proposal_boxes for x in proposals]
         box_features = self._shared_roi_transform(
-            [features[f] for f in self.in_features], proposal_boxes, res5
+            [features[f] for f in self.in_features], proposal_boxes, res5, lora5
         )
         if attnpool:  # att pooling
             att_feats = attnpool(box_features)
@@ -135,8 +143,15 @@ class CLIPRes5ROIHeads(ROIHeads):
             predictions = self.box_predictor(box_features.mean(dim=[2, 3]))
 
         if self.training:
+            ##############################
+            #loss_dis_head_0, loss_dis_head_1 = self.head_dis.loss(box_features)
+            ##############################
             del features
             losses = self.box_predictor.losses(predictions, proposals, is_source)
+            ##############################
+            #losses.update({'loss_dis_head_0': loss_dis_head_0})
+            #losses.update({'loss_dis_head_1': loss_dis_head_1})
+            ##############################
             if self.mask_on:
                 proposals, fg_selection_masks = select_foreground_proposals(
                     proposals, self.num_classes
@@ -152,6 +167,7 @@ class CLIPRes5ROIHeads(ROIHeads):
         else:
             #pred_instances, _ = self.box_predictor.inference(predictions, proposals)
             pred_instances, _ = self.box_predictor.inference(predictions, proposals, is_source)
+
             pred_instances = self.forward_with_given_boxes(features, pred_instances, res5)
             return pred_instances, {}
 

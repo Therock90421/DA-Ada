@@ -106,6 +106,11 @@ class CLIPFastRCNN(nn.Module):
         self.use_clip_attpool = use_clip_attpool # if True (C4+text_emb_as_classifier), use att_pool to replace default mean pool
         #####################
         self.Discriminator = DAFeatDiscriminator(1024)
+        self.Discriminator1 = DAFeatDiscriminator(256)
+        self.Discriminator2 = DAFeatDiscriminator(512)
+        self.Discriminator3 = DAFeatDiscriminator(2048)
+
+        
 
     @classmethod
     def from_config(cls, cfg):
@@ -226,12 +231,23 @@ class CLIPFastRCNN(nn.Module):
         #        print(name)
         #print(features['res4'].shape)   [B, 1024, *, *]
         loss_dis_0, loss_dis_1 = self.Discriminator.loss(features['res4'])
+        ##############
+        # loss_dis_1_0, loss_dis_1_1 = self.Discriminator1.loss(features['res2'])
+        # loss_dis_2_0, loss_dis_2_1 = self.Discriminator2.loss(features['res3'])
+        # loss_dis_0 += loss_dis_1_0
+        # loss_dis_0 += loss_dis_2_0
+        # loss_dis_0 = loss_dis_0 / 3
+        # loss_dis_1 += loss_dis_1_1
+        # loss_dis_1 += loss_dis_2_1
+        # loss_dis_1 = loss_dis_1 / 3
+        ##############
 
 
         # Given the proposals, crop region features from 2D image features and classify the regions
         if self.use_clip_c4: # use C4 + resnet weights from CLIP
             if self.use_clip_attpool: # use att_pool from CLIP to match dimension
-                _, detector_losses = self.roi_heads(images, features, proposals, gt_instances, res5=self.backbone.layer4, attnpool=self.backbone.attnpool, is_source=is_source)
+                #_, detector_losses = self.roi_heads(images, features, proposals, gt_instances, res5=self.backbone.layer4, attnpool=self.backbone.attnpool, is_source=is_source)
+                _, detector_losses = self.roi_heads(images, features, proposals, gt_instances, res5=self.backbone.layer4, attnpool=self.backbone.attnpool, is_source=is_source, lora5=self.backbone.lora_layer4)
             else: # use mean pool
                 _, detector_losses = self.roi_heads(images, features, proposals, gt_instances, res5=self.backbone.layer4)
         else:  # regular detector setting
@@ -300,7 +316,8 @@ class CLIPFastRCNN(nn.Module):
         # Given the proposals, crop region features from 2D image features and classify the regions
         if self.use_clip_c4: # use C4 + resnet weights from CLIP
             if self.use_clip_attpool: # use att_pool from CLIP to match dimension
-                results, _ = self.roi_heads(images, features, proposals, None, res5=self.backbone.layer4, attnpool=self.backbone.attnpool)
+                results, _ = self.roi_heads(images, features, proposals, None, res5=self.backbone.layer4, attnpool=self.backbone.attnpool, lora5=self.backbone.lora_layer4)
+                #results, _ = self.roi_heads(images, features, proposals, None, res5=self.backbone.layer4, attnpool=self.backbone.attnpool)
             else: # use mean pool
                 results, _ = self.roi_heads(images, features, proposals, None, res5=self.backbone.layer4)
         else:  # regular detector setting
@@ -905,7 +922,7 @@ class DAFeatDiscriminator(nn.Module):
                         stride=1,
                         padding=0))
             if i == 2:
-                self.norm.append(get_norm('BN', chn_out))
+                self.norm.append(get_norm('SyncBN', chn_out))
                 break
             self.norm.append(get_norm('GN', chn_out))
 

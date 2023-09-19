@@ -73,7 +73,7 @@ def create_ddp_model(model, *, fp16_compression=False, **kwargs):
         return model
     if "device_ids" not in kwargs:
         kwargs["device_ids"] = [comm.get_local_rank()]
-    ddp = DistributedDataParallel(model, **kwargs)
+    ddp = DistributedDataParallel(model, find_unused_parameters=True, **kwargs)
     if fp16_compression:
         from torch.distributed.algorithms.ddp_comm_hooks import default as comm_hooks
 
@@ -777,9 +777,9 @@ class DATrainer(TrainerBase):
         data_loader_s, data_loader_t = self.build_train_loader(cfg)
 
         model = create_ddp_model(model, broadcast_buffers=False)
-        # Added pretrain or prompt tuning option to DASimpleTrainer
+        # Added pretrain or prompt tuning or LoRA option to DASimpleTrainer
         self._trainer = (AMPTrainer if cfg.SOLVER.AMP.ENABLED else DASimpleTrainer)(
-            model, data_loader_s, data_loader_t, optimizer, is_prompt_tuning=cfg.LEARNABLE_PROMPT.TUNING
+            model, data_loader_s, data_loader_t, optimizer, is_prompt_tuning=cfg.LEARNABLE_PROMPT.TUNING, is_LoRA=cfg.LEARNABLE_PROMPT.LoRA
         )
 
         self.scheduler = self.build_lr_scheduler(cfg, optimizer)

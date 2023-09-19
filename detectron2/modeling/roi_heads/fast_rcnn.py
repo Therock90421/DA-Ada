@@ -203,6 +203,9 @@ def fast_rcnn_inference_single_image(
         keep = keep[:topk_per_image]
     boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
     scores_bf_multiply = scores_bf_multiply[keep]
+    # torch.set_printoptions(profile="full")
+    # print(boxes.cpu().detach().int())
+    # quit()
 
     result = Instances(image_shape)
     result.pred_boxes = Boxes(boxes)
@@ -403,6 +406,7 @@ class FastRCNNOutputLayers(nn.Module):
         ctx_size: int = 8,
         prompt_class: tuple = (None),
         is_prompt_tuning: bool = False,
+        is_lora: bool = False
     ):
         """
         NOTE: this interface is experimental.
@@ -456,6 +460,7 @@ class FastRCNNOutputLayers(nn.Module):
             self.clip_model.eval()
             self.ctx_size = ctx_size
             self.is_prompt_tuning = is_prompt_tuning
+            self.is_lora = is_lora
 
             for params in self.clip_model.parameters():
                 params.requires_grad_(False)
@@ -545,7 +550,8 @@ class FastRCNNOutputLayers(nn.Module):
                                        cfg.MODEL.CLIP.CLSS_TEMP, cfg.MODEL.CLIP.FOCAL_SCALED_LOSS),
             "ctx_size"              : cfg.LEARNABLE_PROMPT.CTX_SIZE,
             "prompt_class"          : cfg.LEARNABLE_PROMPT.CLASS,
-            "is_prompt_tuning"      : cfg.LEARNABLE_PROMPT.TUNING
+            "is_prompt_tuning"      : cfg.LEARNABLE_PROMPT.TUNING,
+            "is_lora"               : cfg.LEARNABLE_PROMPT.LoRA
             # fmt: on
         }
 
@@ -564,6 +570,7 @@ class FastRCNNOutputLayers(nn.Module):
         """
         if x.dim() > 2:
             x = torch.flatten(x, start_dim=1)
+
         ##################################
 
         # use clip text embeddings as classifier's weights
@@ -577,6 +584,7 @@ class FastRCNNOutputLayers(nn.Module):
             # training or closed-set model inference
             else: 
                 cls_scores = normalized_x @ F.normalize(self.cls_score.weight, p=2.0, dim=1).t()
+
                 if self.use_bias:
                     cls_scores += self.cls_score.bias
                 ##########################################
@@ -729,6 +737,17 @@ class FastRCNNOutputLayers(nn.Module):
                 losses['loss_pseudo_source_domain'] = 0.25 * (F.cross_entropy(
                         score_source, label_p, reduction="none") * mask).sum() / mask.sum()
                 #losses["loss_ema_target"] = loss_ema
+        # if self.is_lora:
+        #     if not is_source:
+        #         # pseudo_label = torch.softmax(scores, dim=-1).detach()
+        #         pseudo_label = torch.softmax(scores, dim=-1)
+        #         max_probs, label_p = torch.max(pseudo_label, dim=-1)
+        #         mask = max_probs.ge(0.5).float().detach()
+        #         #losses['loss_pseudo_target_domain'] = (F.cross_entropy(
+        #         #        scores, label_p, reduction="none") * mask).sum() / mask.sum()
+        #         losses['loss_target_entropy'] = - (pseudo_label * torch.log_softmax(scores, dim=-1)).sum() / N
+        #         #losses['loss_target_entropy'] = - (torch.sum(pseudo_label * torch.log_softmax(scores, dim=-1), dim = -1) * mask).sum() / mask.sum()
+        #         # torch.log(torch.softmax(logits, dim=-1) + 1e-7)
         ########################################
 
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
@@ -825,6 +844,7 @@ class FastRCNNOutputLayers(nn.Module):
         """
         ### scores: [*, domains * (cls + 1)]
         #scores, proposal_deltas = predictions
+
         scores, proposal_deltas, da_scores, ema_scores = predictions
         if self.is_prompt_tuning:
             pseudo_scores = scores
@@ -946,5 +966,6 @@ class FastRCNNOutputLayers(nn.Module):
         scores, _ = predictions
         num_inst_per_image = [len(p) for p in proposals]
         probs = F.softmax(scores, dim=-1)
+
         return probs.split(num_inst_per_image, dim=0)
 

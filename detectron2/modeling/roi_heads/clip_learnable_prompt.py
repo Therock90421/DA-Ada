@@ -42,7 +42,10 @@ class PromptLearner(nn.Module):
         dtype = clip_model.dtype
         ctx_dim = clip_model.ln_final.weight.shape[0]
         domain_names = ['cityscapes', 'foggycityscapes']
+        #domain_names = ['game', 'real']
         domain_templates = ['in a {} image'.format(domain_name) for domain_name in domain_names]
+        # without domain description
+        #domain_templates = ['in a image', 'in a image']
         n_dms = len(domain_names)  # number of domains
         n_ctx_ds = ctx             # number of context words in domain specific part
         self.n_dms = n_dms
@@ -56,9 +59,6 @@ class PromptLearner(nn.Module):
         di_vectors = torch.empty(n_ctx_di, ctx_dim, dtype=dtype).to(torch.device("cuda"))
         # only di_vectors
         #di_vectors = torch.empty(n, ctx_dim, dtype=dtype).to(torch.device("cuda"))
-        # class-specific context
-        #di_vectors = torch.empty(n_cls, n_ctx_di, ctx_dim, dtype=dtype).to(torch.device("cuda"))
-
         nn.init.normal_(di_vectors, std=0.02)
         print(f'Number of domain-invariant context words (tokens): {n_ctx_di}')       
         self.ctx_di = nn.Parameter(di_vectors)
@@ -134,8 +134,6 @@ class PromptLearner(nn.Module):
         ctx = torch.cat([ctx_di, ctx_ds], dim=2).reshape(self.n_dms * self.n_cls, self.n_ctx_di + self.n_ctx_ds, ctx_dim) # [n_dms, n_cls, 16, 512]-> [n_dms * n_cls, 16, 512]
         # only di_vectors
         #ctx = ctx_di.reshape(self.n_dms * self.n_cls, self.n_ctx_di + self.n_ctx_ds, ctx_dim)
-        # only ds_vectors
-        #ctx = ctx_ds.reshape(self.n_dms * self.n_cls, self.n_ctx_di + self.n_ctx_ds, ctx_dim)
         prompts = torch.cat([
             prefix, # [n_cls, 1, 512]
             ctx,    # [n_dms * n_cls, 16, 512]
@@ -159,8 +157,6 @@ class PromptLearner(nn.Module):
         ctx_ema = torch.cat([ctx_di_ema, ctx_ds_ema], dim=2).reshape(self.n_dms * self.n_cls, self.n_ctx_di + self.n_ctx_ds, ctx_dim) # [n_dms, n_cls, 16, 512]-> [n_dms * n_cls, 16, 512]
         # only di_vectors
         #ctx_ema = ctx_di_ema.reshape(self.n_dms * self.n_cls, self.n_ctx_di + self.n_ctx_ds, ctx_dim)
-        # only ds_vectors
-        #ctx_ema = ctx_ds_ema.reshape(self.n_dms * self.n_cls, self.n_ctx_di + self.n_ctx_ds, ctx_dim)
         prompts_ema = torch.cat([
             prefix, # [n_cls, 1, 512]
             ctx_ema,    # [n_dms * n_cls, 16, 512]

@@ -3,6 +3,7 @@ from typing import Tuple, Union
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch import nn
 
@@ -10,6 +11,7 @@ from .backbone import Backbone
 from .build import BACKBONE_REGISTRY
 from detectron2.layers.blocks import FrozenBatchNorm2d
 from detectron2.layers import ShapeSpec
+from detectron2.layers import get_norm
 
 class Bottleneck(nn.Module):
     expansion = 4
@@ -69,7 +71,97 @@ class Bottleneck(nn.Module):
         out = self.relu(out)
         return out
 
+########### LoRA Design
+class LoRA(nn.Module):
+    expansion = 4
 
+    def __init__(self, inplanes, midplanes, outplanes, downsample, norm_type='FronzenBN'):
+        super().__init__()
+
+        # all conv layers have stride 1. an avgpool is performed after the second convolution when stride > 1
+        self.conv1 = nn.Conv2d(inplanes, inplanes, 1, bias=False)
+        #self.conv1_1 = nn.Conv2d(inplanes, inplanes // 4, 1, padding=0, bias=False)
+        #self.conv1_3 = nn.Conv2d(inplanes, inplanes // 4, 3, padding=1, bias=False)
+        #self.conv1_5 = nn.Conv2d(inplanes, inplanes // 4, 5, padding=2, bias=False)
+        #self.conv1_7 = nn.Conv2d(inplanes, inplanes // 4, 7, padding=3, bias=False)
+        if norm_type == 'FronzenBN':
+            self.bn1 = FrozenBatchNorm2d(inplanes) # nn.BatchNorm2d(planes)
+            #self.bn1_1 = FrozenBatchNorm2d(inplanes // 4) 
+            #self.bn1_3 = FrozenBatchNorm2d(inplanes // 4) 
+            #self.bn1_5 = FrozenBatchNorm2d(inplanes // 4) 
+            #self.bn1_7 = FrozenBatchNorm2d(inplanes // 4) 
+        elif norm_type == 'SyncBN':
+            self.bn1 = nn.SyncBatchNorm(inplanes)
+            #self.bn1_1 = nn.SyncBatchNorm(inplanes // 4) 
+            #self.bn1_3 = nn.SyncBatchNorm(inplanes // 4) 
+            #self.bn1_5 = nn.SyncBatchNorm(inplanes // 4) 
+            #self.bn1_7 = nn.SyncBatchNorm(inplanes // 4) 
+
+        #self.conv2 = nn.Conv2d(inplanes, midplanes, 3, padding=1, bias=False)
+        self.pool2 = nn.AvgPool2d(2, ceil_mode=True)
+        self.pool4 = nn.AvgPool2d(4, ceil_mode=True)
+        self.pool8 = nn.AvgPool2d(8, ceil_mode=True)
+        self.conv2_1 = nn.Conv2d(inplanes, midplanes, 3, padding=1, bias=False)
+        self.conv2_3 = nn.Conv2d(inplanes, midplanes, 3, padding=1, bias=False)
+        self.conv2_5 = nn.Conv2d(inplanes, midplanes, 3, padding=1, bias=False)
+        self.conv2_7 = nn.Conv2d(inplanes, midplanes, 3, padding=1, bias=False)
+        if norm_type == 'FronzenBN':
+            self.bn2 = FrozenBatchNorm2d(midplanes) # nn.BatchNorm2d(planes)
+            self.bn2_1 = FrozenBatchNorm2d(midplanes) 
+            self.bn2_3 = FrozenBatchNorm2d(midplanes) 
+            self.bn2_5 = FrozenBatchNorm2d(midplanes) 
+            self.bn2_7 = FrozenBatchNorm2d(midplanes) 
+        elif norm_type == 'SyncBN':
+            self.bn2 = nn.SyncBatchNorm(midplanes)
+            self.bn2_1 = nn.SyncBatchNorm(midplanes) 
+            self.bn2_3 = nn.SyncBatchNorm(midplanes) 
+            self.bn2_5 = nn.SyncBatchNorm(midplanes) 
+            self.bn2_7 = nn.SyncBatchNorm(midplanes)
+        self.conv2_1_r = nn.Conv2d(midplanes, midplanes, 1, padding=0, bias=False)
+        self.conv2_3_r = nn.Conv2d(midplanes, midplanes, 1, padding=0, bias=False)
+        self.conv2_5_r = nn.Conv2d(midplanes, midplanes, 1, padding=0, bias=False)
+        self.conv2_7_r = nn.Conv2d(midplanes, midplanes, 1, padding=0, bias=False)
+
+        self.conv3 = nn.Conv2d(midplanes, outplanes, 1, bias=False)
+        if norm_type == 'FronzenBN':
+            self.bn3 = FrozenBatchNorm2d(outplanes) 
+        elif norm_type == 'SyncBN':
+            self.bn3 = nn.SyncBatchNorm(outplanes)
+        
+        self.avgpool = nn.AvgPool2d(2) if downsample is True else nn.Identity()
+        self.zero_conv = nn.Conv2d(outplanes, outplanes, 1, bias=False)
+        nn.init.zeros_(self.zero_conv.weight)
+        if self.zero_conv.bias is not None:
+            nn.init.zeros_(self.zero_conv.bias)
+        if norm_type == 'FronzenBN':
+            self.bn4 = FrozenBatchNorm2d(outplanes) 
+        elif norm_type == 'SyncBN':
+            self.bn4 = nn.SyncBatchNorm(outplanes)
+
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x: torch.Tensor):
+        out = self.relu(self.bn1(self.conv1(x)))
+        # out1 = self.relu(self.bn1_1(self.conv1_1(x)))
+        # out3 = self.relu(self.bn1_3(self.conv1_3(x)))
+        # out5 = self.relu(self.bn1_5(self.conv1_5(x)))
+        # out7 = self.relu(self.bn1_7(self.conv1_7(x)))
+        #out = self.relu(self.bn2(self.conv2(out)))
+        #out = self.relu(self.bn2(torch.cat([self.conv2_1(out1), self.conv2_3(out3), self.conv2_5(out5), self.conv2_7(out7)], dim=1)))
+        out_1 = self.conv2_1_r(self.relu(self.conv2_1(out)))
+        N, C, H, W = out_1.shape
+        out_2 = self.conv2_3_r(F.interpolate(self.relu(self.conv2_3(self.pool2(out))), size = out_1.shape[2:], mode='bilinear', align_corners=False))
+        out_3 = self.conv2_5_r(F.interpolate(self.relu(self.conv2_5(self.pool4(out))), size = out_1.shape[2:], mode='bilinear', align_corners=False))
+        out_4 = self.conv2_7_r(F.interpolate(self.relu(self.conv2_7(self.pool8(out))), size = out_1.shape[2:], mode='bilinear', align_corners=False))
+        out = self.relu(self.bn2(out_1 + out_2 + out_3 + out_4))
+        out = self.relu(self.bn3(self.conv3(out)))
+        out = self.avgpool(out)
+        out = self.zero_conv(out)
+        out = self.bn4(out)
+        #out = self.bn4(self.zero_conv(out))
+
+        return out
+####################
 class AttentionPool2d(nn.Module):
     def __init__(self, spacial_dim: int, embed_dim: int, num_heads: int, output_dim: int = None):
         super().__init__()
@@ -158,6 +250,25 @@ class ModifiedResNet(Backbone):
         else:  # C4, layer4 created here won't be used in backbone, but used in roi_head
             self.layer4 = self._make_layer(width * 8, layers[3], stride=2) # None
         
+        ##################### LoRA layers
+        self.lora_layer1 = self._make_lora(64, 16, 256) #(64, 32, 256)
+        self.lora_layer2 = self._make_lora(256, 64, 512, True) #(256, 128, 512, True)
+        self.lora_layer3 = self._make_lora(512, 128, 1024, True) #(512, 256, 1024, True)
+        if 'res5' in out_features:  # FPN
+            self.lora_layer4 = self._make_lora(1024, 512, 2048, True)
+        else:  # C4, layer4 created here won't be used in backbone, but used in roi_head
+            self.lora_layer4 = self._make_lora(1024, 512, 2048, True)
+        self.diff_layer1 = self._make_lora(256, 32, 256) #self._make_diff(256)
+        self.diff_layer2 = self._make_lora(512, 128, 512) #self._make_diff(512)
+        self.diff_layer3 = self._make_lora(1024, 256, 1024) #self._make_diff(1024)
+        self.inv_attn1 = self._make_attn(256)
+        self.inv_attn2 = self._make_attn(512)
+        self.inv_attn3 = self._make_attn(1024)
+        self.spc_attn1 = self._make_attn(256)
+        self.spc_attn2 = self._make_attn(512)
+        self.spc_attn3 = self._make_attn(1024)
+        self.softmax = nn.Softmax(dim=1)
+        ######################
         self.pool_vec = pool_vec
         if self.pool_vec or create_att_pool:  # pool a vector representation for an image
             embed_dim = width * 32  # the ResNet feature dimension
@@ -189,6 +300,31 @@ class ModifiedResNet(Backbone):
             layers.append(Bottleneck(self._inplanes, planes, norm_type=self.norm_type))
 
         return nn.Sequential(*layers)
+    ################
+    def _make_lora(self, inplanes, midplanes, outplanes, downsample=False):
+        layers = [LoRA(inplanes, midplanes, outplanes, downsample, norm_type=self.norm_type)]
+
+        return nn.Sequential(*layers)
+
+    def _make_attn(self, planes):
+        attn_layers = []
+        attn_layers.extend([
+                nn.Conv2d(planes, planes, kernel_size=1, padding=0, bias=False),
+                FrozenBatchNorm2d(planes),
+                nn.ReLU(inplace=True),
+            ])
+        return nn.Sequential(*attn_layers) 
+    
+    def _make_diff(self, planes):
+        diff_layers = []
+        diff_layers.extend([
+                nn.Conv2d(planes, planes, kernel_size=3, padding=1, bias=False),
+                FrozenBatchNorm2d(planes),
+                nn.ReLU(inplace=True),
+            ])
+        return nn.Sequential(*diff_layers)
+
+    ################
 
     def forward(self, x):
         def stem(x):
@@ -199,18 +335,61 @@ class ModifiedResNet(Backbone):
         
         assert x.dim() == 4, f"ResNet takes an input of shape (N, C, H, W). Got {x.shape} instead!"
         outputs = {}
+        dis_feat = {}
         x = x.type(self.conv1.weight.dtype) # det2 resnet50: [3, 800, 1216]; CLIP resnet50: [3, 224, 224]
         x = stem(x) # det2 resnet50: [64, 200, 304]; CLIP resnet50: [64, 56, 56]
         if "stem" in self._out_features:
-            outputs["stem"] = x
-        x = self.layer1(x) # det2 resnet50: [256, 200, 304]; CLIP resnet50: [256, 56, 56]
+            outputs["stem"] = x       # 64
+        # x = self.layer1(x) # det2 resnet50: [256, 200, 304]; CLIP resnet50: [256, 56, 56]
+        # outputs['res2'] = x if "res2" in self._out_features else None
+        # x = self.layer2(x) # det2 resnet50: [512, 100, 152]; CLIP resnet50: [512, 28, 28]
+        # outputs['res3'] = x if "res3" in self._out_features else None
+        # x = self.layer3(x) # det2 resnet50: [1024, 50, 76]; CLIP resnet50: [1024, 14, 14]
+        # outputs['res4'] = x if "res4" in self._out_features else None
+        # x = self.layer4(x)  if "res5" in self._out_features else x # det2 resnet50: [2048, 25, 38]; CLIP resnet50: [2048, 7, 7]
+        # outputs['res5'] = x if "res5" in self._out_features else None
+        ############## with lora
+        x_lora = self.lora_layer1(x)
+        for i in range(len(self.layer1)):
+            x = self.layer1[i](x)
+            if i == 0:
+                temp = x
+        #x = self.layer1(x) # det2 resnet50: [256, 200, 304]; CLIP resnet50: [256, 56, 56]
+        x = x + x_lora #self.relu(x + x_lora)
+        dis_feat['res2'] = x
+        diff = self.diff_layer1(temp - x)
+        x = x + x * diff
         outputs['res2'] = x if "res2" in self._out_features else None
-        x = self.layer2(x) # det2 resnet50: [512, 100, 152]; CLIP resnet50: [512, 28, 28]
+        
+        x_lora = self.lora_layer2(x)
+        for i in range(len(self.layer2)):
+            x = self.layer2[i](x)
+            if i == 0:
+                temp = x
+        #x = self.layer2(x) # det2 resnet50: [512, 100, 152]; CLIP resnet50: [512, 28, 28]
+        x = x + x_lora #self.relu(x + x_lora)
+        dis_feat['res3'] = x
+        diff = self.diff_layer2(temp - x)
+        x = x + x * diff
         outputs['res3'] = x if "res3" in self._out_features else None
-        x = self.layer3(x) # det2 resnet50: [1024, 50, 76]; CLIP resnet50: [1024, 14, 14]
+
+
+        x_lora = self.lora_layer3(x)
+        for i in range(len(self.layer3)):
+            x = self.layer3[i](x)
+            if i == 0:
+                temp = x
+        #x = self.layer3(x) # det2 resnet50: [1024, 50, 76]; CLIP resnet50: [1024, 14, 14]
+        x = x + x_lora #self.relu(x + x_lora)
+        dis_feat['res4'] = x
+        diff = self.diff_layer3(temp - x)
+        x = x + x * diff
         outputs['res4'] = x if "res4" in self._out_features else None
+        #x_lora = self.layer4(x)  if "res5" in self._out_features else None
         x = self.layer4(x)  if "res5" in self._out_features else x # det2 resnet50: [2048, 25, 38]; CLIP resnet50: [2048, 7, 7]
+        #x = self.relu(x + x_lora) if "res5" in self._out_features else x
         outputs['res5'] = x if "res5" in self._out_features else None
+        ###############
 
         if self.pool_vec:  # pool a vector representation for an image, for global image classification
             x = self.attnpool(x) # CLIP resnet50: [1024]

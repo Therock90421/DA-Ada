@@ -747,6 +747,8 @@ _C.LEARNABLE_PROMPT = CN()
 _C.LEARNABLE_PROMPT.CTX_SIZE = 8
 _C.LEARNABLE_PROMPT.TUNING = False
 _C.LEARNABLE_PROMPT.CLASS = ('car',)
+_C.LEARNABLE_PROMPT.LoRA = False
+
 ##########################
 # global config is for quick hack purposes.
 # You can set them in command line or config files,
