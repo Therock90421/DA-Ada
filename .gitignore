@@ -9,7 +9,15 @@ pretrained_ckpt
 datasets/coco
 datasets/lvis
 datasets/cifar-10-batches-py
-datasets
+datasets/cityscapes_voc
+datasets/clipart_voc
+datasets/comic_voc
+datasets/foggy_cityscapes_voc
+datasets/kitti
+datasets/pascal_voc
+datasets/sim10k_coco
+datasets/watercolor_voc
+
 
 *.png
 *.json
@@ -55,7 +63,6 @@ _darcs
 
 # project dirs
 /detectron2/model_zoo/configs
-/datasets/*
 !/datasets/*.*
 !/datasets/custom_images/
 !/datasets/custom_images/*.jpg
@@ -64,3 +71,7 @@ _darcs
 /projects/*/datasets
 /models
 /snippet
+
+/*.err
+/*.log
+/*.out
