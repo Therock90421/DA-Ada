@@ -251,9 +251,9 @@ class ModifiedResNet(Backbone):
             self.layer4 = self._make_layer(width * 8, layers[3], stride=2) # None
         
         ##################### LoRA layers
-        self.lora_layer1 = self._make_lora(64, 16, 256) #(64, 32, 256)
-        self.lora_layer2 = self._make_lora(256, 64, 512, True) #(256, 128, 512, True)
-        self.lora_layer3 = self._make_lora(512, 128, 1024, True) #(512, 256, 1024, True)
+        self.lora_layer1 = self._make_lora(64, 32, 256)
+        self.lora_layer2 = self._make_lora(256, 128, 512, True)
+        self.lora_layer3 = self._make_lora(512, 256, 1024, True)
         if 'res5' in out_features:  # FPN
             self.lora_layer4 = self._make_lora(1024, 512, 2048, True)
         else:  # C4, layer4 created here won't be used in backbone, but used in roi_head
@@ -336,6 +336,8 @@ class ModifiedResNet(Backbone):
         assert x.dim() == 4, f"ResNet takes an input of shape (N, C, H, W). Got {x.shape} instead!"
         outputs = {}
         dis_feat = {}
+        di_feat = {}
+        ds_feat = {}
         x = x.type(self.conv1.weight.dtype) # det2 resnet50: [3, 800, 1216]; CLIP resnet50: [3, 224, 224]
         x = stem(x) # det2 resnet50: [64, 200, 304]; CLIP resnet50: [64, 56, 56]
         if "stem" in self._out_features:
@@ -358,7 +360,9 @@ class ModifiedResNet(Backbone):
         x = x + x_lora #self.relu(x + x_lora)
         dis_feat['res2'] = x
         diff = self.diff_layer1(temp - x)
+        ds_feat['res2'] = x * diff
         x = x + x * diff
+        di_feat['res2'] = dis_feat['res2'] #x_lora
         outputs['res2'] = x if "res2" in self._out_features else None
         
         x_lora = self.lora_layer2(x)
@@ -370,7 +374,9 @@ class ModifiedResNet(Backbone):
         x = x + x_lora #self.relu(x + x_lora)
         dis_feat['res3'] = x
         diff = self.diff_layer2(temp - x)
+        ds_feat['res3'] = x * diff
         x = x + x * diff
+        di_feat['res3'] = dis_feat['res3'] #x_lora
         outputs['res3'] = x if "res3" in self._out_features else None
 
 
@@ -383,7 +389,9 @@ class ModifiedResNet(Backbone):
         x = x + x_lora #self.relu(x + x_lora)
         dis_feat['res4'] = x
         diff = self.diff_layer3(temp - x)
+        ds_feat['res4'] = x * diff
         x = x + x * diff
+        di_feat['res4'] = dis_feat['res4'] #x_lora
         outputs['res4'] = x if "res4" in self._out_features else None
         #x_lora = self.layer4(x)  if "res5" in self._out_features else None
         x = self.layer4(x)  if "res5" in self._out_features else x # det2 resnet50: [2048, 25, 38]; CLIP resnet50: [2048, 7, 7]
@@ -395,7 +403,7 @@ class ModifiedResNet(Backbone):
             x = self.attnpool(x) # CLIP resnet50: [1024]
             return x
         else:  # for FPN
-            return outputs
+            return outputs, di_feat, ds_feat, dis_feat
 
     def freeze(self, freeze_at=0):
         """

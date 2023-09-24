@@ -397,20 +397,21 @@ class DASimpleTrainer(TrainerBase):
         assert self.model.training, "[SimpleTrainer] model was changed to eval mode!"
         start = time.perf_counter()
         ####################################
+        if self.is_lora:
+            # During pre-training, freeze backbone and only train lora network
+            for name, param in self.model.named_parameters():
+                if param.requires_grad:
+                    param.requires_grad = False
+                if 'lora' in name or 'Discriminator' in name or 'roi_heads.box_predictor.bbox_pred' in name or 'head_dis' in name or 'diff' in name:
+                    param.requires_grad = True
         if self.is_prompt_tuning:
             # After pre-trained, freeze the model's parameters and conduct prompt tuning
             for name, param in self.model.named_parameters():
                 if param.requires_grad:
                     param.requires_grad = False
             for name, param in self.model.named_parameters():
-                if name == 'roi_heads.box_predictor.DAHead.prompt_learner.ctx_di' or name == 'roi_heads.box_predictor.DAHead.prompt_learner.ctx_ds':
-                    param.requires_grad = True
-        if self.is_lora:
-            # During pre-training, freeze backbone and only train lora network
-            for name, param in self.model.named_parameters():
-                if param.requires_grad:
-                    param.requires_grad = False
-                if 'lora' in name or 'Discriminator' in name or 'roi_heads.box_predictor.bbox_pred' in name or 'head_dis' in name:
+                #if name == 'roi_heads.box_predictor.DAHead.prompt_learner.ctx_di' or name == 'roi_heads.box_predictor.DAHead.prompt_learner.ctx_ds':
+                if 'DAHead' in name:
                     param.requires_grad = True
             #for name, param in self.model.named_parameters():
             #    if 'backbone.attnpool' in name:
@@ -444,9 +445,13 @@ class DASimpleTrainer(TrainerBase):
             #            print('aaaaaaaa')
             
         del loss_dict_s['loss_dis_1']
+        del loss_dict_s['loss_dis_1_1']
+        del loss_dict_s['loss_dis_2_1']
         #del loss_dict_s['loss_dis_head_1']
         loss_dict_t = self.model(data_t, is_source = False)
         del loss_dict_t['loss_dis_0']
+        del loss_dict_s['loss_dis_1_0']
+        del loss_dict_s['loss_dis_2_0']
         #del loss_dict_t['loss_dis_head_0']
         del loss_dict_t['loss_cls']
         del loss_dict_t['loss_box_reg']
@@ -487,7 +492,8 @@ class DASimpleTrainer(TrainerBase):
         suboptimal as explained in https://arxiv.org/abs/2006.15704 Sec 3.2.4
         """
         if self.is_prompt_tuning:
-            self.update_ema_buffer(self.model, 0.99, self.iter)
+            pass
+            #self.update_ema_buffer(self.model, 0.99, self.iter)
 
         self.optimizer.step()
         # EMA update

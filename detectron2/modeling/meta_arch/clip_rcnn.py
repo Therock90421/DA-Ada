@@ -109,6 +109,8 @@ class CLIPFastRCNN(nn.Module):
         self.Discriminator1 = DAFeatDiscriminator(256)
         self.Discriminator2 = DAFeatDiscriminator(512)
         self.Discriminator3 = DAFeatDiscriminator(2048)
+        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
+
 
         
 
@@ -225,15 +227,19 @@ class CLIPFastRCNN(nn.Module):
 
         # recognition branch: get 2D feature maps using the backbone of recognition branch
         images = self.preprocess_image(batched_inputs)
-        features = self.backbone(images.tensor)
+        features, di_features, ds_features, dis_features = self.backbone(images.tensor)
+        #di_features = torch.cat([self.global_pool(di_features['res2']), self.global_pool(di_features['res3']), self.global_pool(di_features['res4'])], dim=1)
+        #di_features = di_features.mean(dim = 0, keepdim = True)
+        #ds_features = torch.cat([self.global_pool(ds_features['res2']), self.global_pool(ds_features['res3']), self.global_pool(ds_features['res4'])], dim=1)
+        #ds_features = ds_features.mean(dim = 0, keepdim = True)
         #for name,param in self.backbone.named_parameters():
         #    if param.requires_grad:
         #        print(name)
         #print(features['res4'].shape)   [B, 1024, *, *]
-        loss_dis_0, loss_dis_1 = self.Discriminator.loss(features['res4'])
+        loss_dis_0, loss_dis_1 = self.Discriminator.loss(dis_features['res4'])
         ##############
-        # loss_dis_1_0, loss_dis_1_1 = self.Discriminator1.loss(features['res2'])
-        # loss_dis_2_0, loss_dis_2_1 = self.Discriminator2.loss(features['res3'])
+        loss_dis_1_0, loss_dis_1_1 = self.Discriminator1.loss(dis_features['res2'])
+        loss_dis_2_0, loss_dis_2_1 = self.Discriminator2.loss(dis_features['res3'])
         # loss_dis_0 += loss_dis_1_0
         # loss_dis_0 += loss_dis_2_0
         # loss_dis_0 = loss_dis_0 / 3
@@ -247,7 +253,7 @@ class CLIPFastRCNN(nn.Module):
         if self.use_clip_c4: # use C4 + resnet weights from CLIP
             if self.use_clip_attpool: # use att_pool from CLIP to match dimension
                 #_, detector_losses = self.roi_heads(images, features, proposals, gt_instances, res5=self.backbone.layer4, attnpool=self.backbone.attnpool, is_source=is_source)
-                _, detector_losses = self.roi_heads(images, features, proposals, gt_instances, res5=self.backbone.layer4, attnpool=self.backbone.attnpool, is_source=is_source, lora5=self.backbone.lora_layer4)
+                _, detector_losses = self.roi_heads(images, features, proposals, di_features, ds_features, gt_instances, res5=self.backbone.layer4, attnpool=self.backbone.attnpool, is_source=is_source, lora5=self.backbone.lora_layer4)
             else: # use mean pool
                 _, detector_losses = self.roi_heads(images, features, proposals, gt_instances, res5=self.backbone.layer4)
         else:  # regular detector setting
@@ -265,6 +271,11 @@ class CLIPFastRCNN(nn.Module):
         losses.update(detector_losses)
         losses.update({'loss_dis_0': loss_dis_0})
         losses.update({'loss_dis_1': loss_dis_1})
+        losses.update({'loss_dis_1_0': loss_dis_1_0})
+        losses.update({'loss_dis_1_1': loss_dis_1_1})
+        losses.update({'loss_dis_2_0': loss_dis_2_0})
+        losses.update({'loss_dis_2_1': loss_dis_2_1})
+
         return losses
 
     def inference(
@@ -309,14 +320,16 @@ class CLIPFastRCNN(nn.Module):
     
         # recognition branch: get 2D feature maps using the backbone of recognition branch
         images = self.preprocess_image(batched_inputs)
-        features = self.backbone(images.tensor)
+        features, di_features, ds_features, _ = self.backbone(images.tensor)
         #assert not torch.any(torch.isnan(features))
+        #di_features = torch.cat([self.global_pool(di_features['res2']), self.global_pool(di_features['res3']), self.global_pool(di_features['res4'])], dim=1)
+        #ds_features = torch.cat([self.global_pool(ds_features['res2']), self.global_pool(ds_features['res3']), self.global_pool(ds_features['res4'])], dim=1)
 
 
         # Given the proposals, crop region features from 2D image features and classify the regions
         if self.use_clip_c4: # use C4 + resnet weights from CLIP
             if self.use_clip_attpool: # use att_pool from CLIP to match dimension
-                results, _ = self.roi_heads(images, features, proposals, None, res5=self.backbone.layer4, attnpool=self.backbone.attnpool, lora5=self.backbone.lora_layer4)
+                results, _ = self.roi_heads(images, features, proposals, di_features, ds_features, None, res5=self.backbone.layer4, attnpool=self.backbone.attnpool, lora5=self.backbone.lora_layer4)
                 #results, _ = self.roi_heads(images, features, proposals, None, res5=self.backbone.layer4, attnpool=self.backbone.attnpool)
             else: # use mean pool
                 results, _ = self.roi_heads(images, features, proposals, None, res5=self.backbone.layer4)
@@ -959,7 +972,7 @@ class DAFeatDiscriminator(nn.Module):
     def loss(self, x):
         # feature domain classification loss
         dis_feat = torch.mean(self.extract_dis_feat(x))
-        dis_loss_0 = 10*self.mse(dis_feat, torch.tensor(0).cuda().float())
+        dis_loss_0 = 3*self.mse(dis_feat, torch.tensor(0).cuda().float()) #10*self.mse(dis_feat, torch.tensor(0).cuda().float())
         if torch.isnan(dis_loss_0):
             print('dis_loss_0 is nan!')
             print(torch.any(torch.isnan(dis_feat)))
@@ -971,7 +984,7 @@ class DAFeatDiscriminator(nn.Module):
             #    print(torch.any(torch.isinf(param)))
         if torch.isinf(dis_loss_0):
             print('dis_loss_0 is inf!')
-        dis_loss_1 = 10*self.mse(dis_feat, torch.tensor(1).cuda().float())
+        dis_loss_1 = 3*self.mse(dis_feat, torch.tensor(1).cuda().float()) #10*self.mse(dis_feat, torch.tensor(1).cuda().float())
         if torch.isnan(dis_loss_1):
             print('dis_loss_1 is nan!')
             print(torch.any(torch.isnan(dis_feat)))

@@ -555,7 +555,7 @@ class FastRCNNOutputLayers(nn.Module):
             # fmt: on
         }
 
-    def forward(self, x):
+    def forward(self, x, x_di, x_ds):
         """
         Args:
             x: per-region features of shape (N, ...) for N bounding boxes to predict.
@@ -570,7 +570,6 @@ class FastRCNNOutputLayers(nn.Module):
         """
         if x.dim() > 2:
             x = torch.flatten(x, start_dim=1)
-
         ##################################
 
         # use clip text embeddings as classifier's weights
@@ -584,12 +583,14 @@ class FastRCNNOutputLayers(nn.Module):
             # training or closed-set model inference
             else: 
                 cls_scores = normalized_x @ F.normalize(self.cls_score.weight, p=2.0, dim=1).t()
-
                 if self.use_bias:
                     cls_scores += self.cls_score.bias
                 ##########################################
                 # learnable prompt embeddings
-                text_embedding = self.DAHead.get_embedding() #[domains * (cls), 1024]
+                
+                #text_embedding = self.DAHead.get_embedding() #[domains * (cls), 1024]
+                # lora prompt tuning version
+                text_embedding = self.DAHead.get_embedding(x_di, x_ds) #[domains * (cls), 1024]
 
                 text_embedding = F.normalize(text_embedding, p=2.0, dim=1)
                 da_cls_scores = normalized_x @ text_embedding.t()
@@ -597,12 +598,12 @@ class FastRCNNOutputLayers(nn.Module):
                 da_cls_scores_target = da_cls_scores[:, self.num_classes:]
 
                 # EMA embeddings
-                text_embedding_ema = self.DAHead.get_embedding_ema().detach() #[domains * (cls), 1024]
+                # text_embedding_ema = self.DAHead.get_embedding_ema().detach() #[domains * (cls), 1024]
 
-                text_embedding_ema = F.normalize(text_embedding_ema, p=2.0, dim=1)
-                ema_cls_scores = normalized_x @ text_embedding_ema.t()
-                ema_cls_scores_source = ema_cls_scores[:, :self.num_classes]
-                ema_cls_scores_target = ema_cls_scores[:, self.num_classes:]
+                # text_embedding_ema = F.normalize(text_embedding_ema, p=2.0, dim=1)
+                # ema_cls_scores = normalized_x @ text_embedding_ema.t()
+                # ema_cls_scores_source = ema_cls_scores[:, :self.num_classes]
+                # ema_cls_scores_target = ema_cls_scores[:, self.num_classes:]
 
 
             
@@ -618,10 +619,12 @@ class FastRCNNOutputLayers(nn.Module):
             da_scores = da_scores / self.temperature 
 
             #EMA scores
-            ema_cls_scores_source = torch.cat((ema_cls_scores_source, bg_score), dim=1)
-            ema_cls_scores_target = torch.cat((ema_cls_scores_target, bg_score), dim=1)
-            ema_scores = torch.cat((ema_cls_scores_source, ema_cls_scores_target), dim=1)   
-            ema_scores = ema_scores / self.temperature
+            # ema_cls_scores_source = torch.cat((ema_cls_scores_source, bg_score), dim=1)
+            # ema_cls_scores_target = torch.cat((ema_cls_scores_target, bg_score), dim=1)
+            # ema_scores = torch.cat((ema_cls_scores_source, ema_cls_scores_target), dim=1)   
+            # ema_scores = ema_scores / self.temperature
+            ema_scores = []
+
             
             scores = torch.cat((cls_scores, bg_score), dim=1)
             scores = torch.cat((scores, scores), dim=1)
@@ -633,6 +636,7 @@ class FastRCNNOutputLayers(nn.Module):
         
         # box regression
         proposal_deltas = self.bbox_pred(x)
+
         return scores, proposal_deltas, da_scores, ema_scores
 
     def losses(self, predictions, proposals, is_source = False):
@@ -718,24 +722,25 @@ class FastRCNNOutputLayers(nn.Module):
         if self.is_prompt_tuning:
             # train learnable prompt embeddings
             if is_source:
-                losses["loss_across_domains"] = self.focal_loss(score_across_domains, gt_classes, gamma=self.focal_scaled_loss)
+                #losses["loss_across_domains"] = self.focal_loss(score_across_domains, gt_classes, gamma=self.focal_scaled_loss)
                 losses["loss_target_domain"] = self.focal_loss(score_target, gt_classes, gamma=self.focal_scaled_loss)
                 # source domain do not need teacher
                 #losses["loss_ema_source"] = loss_ema
             # pseudo loss
             if not is_source:
-                pseudo_scores = pseudo_scores[:, C:] 
-                pseudo_label = torch.softmax(pseudo_scores, dim=-1).detach()
-                max_probs, label_p = torch.max(pseudo_label, dim=-1)
-                mask = max_probs.ge(0.5).float()
-                C_label_p = label_p + C
-                losses['loss_pseudo_target_domain'] = (F.cross_entropy(
-                        score_target, label_p, reduction="none") * mask).sum() / mask.sum()
-                losses['loss_target_entropy'] = - (pseudo_label * torch.log_softmax(score_target, dim=-1)).sum() / N
-                losses['loss_pseudo_across_domain'] = 0.25 * (F.cross_entropy(
-                        score_across_domains, C_label_p, reduction="none") * mask).sum() / mask.sum()
-                losses['loss_pseudo_source_domain'] = 0.25 * (F.cross_entropy(
-                        score_source, label_p, reduction="none") * mask).sum() / mask.sum()
+                pass
+                # pseudo_scores = pseudo_scores[:, C:] 
+                # pseudo_label = torch.softmax(pseudo_scores, dim=-1).detach()
+                # max_probs, label_p = torch.max(pseudo_label, dim=-1)
+                # mask = max_probs.ge(0.5).float()
+                # C_label_p = label_p + C
+                # losses['loss_pseudo_target_domain'] = (F.cross_entropy(
+                #         score_target, label_p, reduction="none") * mask).sum() / mask.sum()
+                # losses['loss_target_entropy'] = - (pseudo_label * torch.log_softmax(score_target, dim=-1)).sum() / N
+                # losses['loss_pseudo_across_domain'] = 0.25 * (F.cross_entropy(
+                #         score_across_domains, C_label_p, reduction="none") * mask).sum() / mask.sum()
+                # losses['loss_pseudo_source_domain'] = 0.25 * (F.cross_entropy(
+                #         score_source, label_p, reduction="none") * mask).sum() / mask.sum()
                 #losses["loss_ema_target"] = loss_ema
         # if self.is_lora:
         #     if not is_source:

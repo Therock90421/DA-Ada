@@ -5,12 +5,14 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from detectron2.config import configurable
 from detectron2.layers import ShapeSpec, nonzero_tuple
 from detectron2.structures import Boxes, ImageList, Instances, pairwise_iou
 from detectron2.utils.events import get_event_storage
 from detectron2.utils.registry import Registry
+from detectron2.layers.blocks import FrozenBatchNorm2d
 
 from ..backbone.resnet import BottleneckBlock, ResNet
 from ..matcher import Matcher
@@ -68,6 +70,13 @@ class CLIPRes5ROIHeads(ROIHeads):
         if self.mask_on:
             self.mask_head = mask_head
         self.head_dis = DAFeatDiscriminator(2048)
+        ############################
+        # lora prompt tuning
+        self.DAHead_di = self._make_prompt_layer(1792, 512 * 8)
+        self.DAHead_ds = self._make_prompt_layer(1792, 512 * 8)
+        self.pool_2 = nn.AvgPool2d(2)
+        self.pool_4 = nn.AvgPool2d(4)
+        self.global_pool = nn.AdaptiveAvgPool2d(1)
 
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -120,8 +129,26 @@ class CLIPRes5ROIHeads(ROIHeads):
         #return backbone_res5(x) + x_lora
         return backbone_res5(x)
 
+    def _shared_roi_align(self, features, boxes):
+        x = self.pooler(features, boxes)
+        return x
 
-    def forward(self, images, features, proposals, targets=None, res5=None, attnpool=None, is_source = False, lora5=None):
+    def _make_prompt_layer(self, inplanes, outplanes):
+        # input: 256 + 512 + 1024  output: 512 * 8
+        prompt_layers = []
+        prompt_layers.extend([
+                nn.Conv2d(inplanes, inplanes, kernel_size=1, padding=0, bias=False),
+                FrozenBatchNorm2d(inplanes),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(inplanes, outplanes, kernel_size=1, padding=0, bias=False),
+                FrozenBatchNorm2d(outplanes),
+                nn.ReLU(inplace=True),
+            ])
+        return nn.Sequential(*prompt_layers)
+
+
+
+    def forward(self, images, features, proposals, x_di, x_ds, targets=None, res5=None, attnpool=None, is_source = False, lora5=None):
         """
         See :meth:`ROIHeads.forward`.
         """
@@ -135,10 +162,23 @@ class CLIPRes5ROIHeads(ROIHeads):
         box_features = self._shared_roi_transform(
             [features[f] for f in self.in_features], proposal_boxes, res5, lora5
         )
+        ###################################
+        # features for lora prompt tuning
+        x_di = torch.cat([self.pool_4(x_di['res2']), self.pool_2(x_di['res3']), x_di['res4']], dim=1) #[N, 1792, H/16, W/16]
+        x_ds = torch.cat([self.pool_4(x_ds['res2']), self.pool_2(x_ds['res3']), x_ds['res4']], dim=1)
+        x_di = self.DAHead_di(x_di) #[N, 512*8, H/16, W/16]
+        x_ds = self.DAHead_ds(x_ds) 
+        x_di = self._shared_roi_align([x_di], proposal_boxes)  #[512 * N, 4096, 14, 14]
+        x_ds = self._shared_roi_align([x_ds], proposal_boxes)
+        x_di = self.global_pool(x_di).mean(dim = 0).flatten()
+        x_ds = self.global_pool(x_ds).mean(dim = 0).flatten()
+        ###################################
         if attnpool:  # att pooling
             att_feats = attnpool(box_features)
             #predictions = self.box_predictor(att_feats)
-            predictions = self.box_predictor(att_feats)
+            #predictions = self.box_predictor(att_feats)
+            predictions = self.box_predictor(att_feats, x_di, x_ds)
+
         else: # mean pooling
             predictions = self.box_predictor(box_features.mean(dim=[2, 3]))
 
@@ -167,7 +207,6 @@ class CLIPRes5ROIHeads(ROIHeads):
         else:
             #pred_instances, _ = self.box_predictor.inference(predictions, proposals)
             pred_instances, _ = self.box_predictor.inference(predictions, proposals, is_source)
-
             pred_instances = self.forward_with_given_boxes(features, pred_instances, res5)
             return pred_instances, {}
 
