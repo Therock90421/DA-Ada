@@ -17,6 +17,7 @@
 # (TODO)
 # Please modify your requirements
 
+#- SBATCH -p nv-gpu             # Submit to 'nvidia-gpu' Partitiion or queue
 #SBATCH -p nv-gpu-hw             # Submit to 'nvidia-gpu' Partitiion or queue
 # SBATCH -t 6-0:00:00             # Run for a maximum time of 0 days, 12 hours, 00 mins, 00 secs
 #- SBATCH -t 6-0:00:00             # Run for a maximum time of 0 days, 12 hours, 00 mins, 00 secs

@@ -46,14 +46,18 @@ class PromptLearner(nn.Module):
         ctx_dim = clip_model.ln_final.weight.shape[0]
         #domain_names = ['cityscapes', 'foggycityscapes']
         #domain_templates = ['in a {} image'.format(domain_name) for domain_name in domain_names]
+        # domain_names = ['clear', 'foggy']
+        # domain_templates = ['in a {} weather'.format(domain_name) for domain_name in domain_names]
         domain_names = ['clear', 'foggy']
-        domain_templates = ['in a {} weather'.format(domain_name) for domain_name in domain_names]
+        domain_templates = ['in an image' for domain_name in domain_names]
         n_dms = len(domain_names)  # number of domains
         n_ctx_ds = ctx             # number of context words in domain specific part
         self.n_dms = n_dms
         self.n_ctx_ds = n_ctx_ds
         n = n_ctx_di + n_ctx_ds    # number of context words in total
 
+        # only di_vectors
+        #n = n_ctx_di
         prompt_prefix = ' '.join(['X'] * n)
         print(f'Initial context: "{prompt_prefix}"')
 
@@ -138,7 +142,7 @@ class PromptLearner(nn.Module):
             ctx_ds = ctx_ds.unsqueeze(1).expand(-1, self.n_cls, -1, -1) # [n_dms, n_cls, 8, 512]
 
         ctx = torch.cat([ctx_di, ctx_ds], dim=2).reshape(self.n_dms * self.n_cls, self.n_ctx_di + self.n_ctx_ds, ctx_dim) # [n_dms, n_cls, 16, 512]-> [n_dms * n_cls, 16, 512]
-
+        #ctx = ctx_di.reshape(self.n_dms * self.n_cls, self.n_ctx_di, ctx_dim) # [n_dms, n_cls, 16, 512]-> [n_dms * n_cls, 16, 512]
         prompts = torch.cat([
             prefix, # [n_dms * n_cls, 1, 512]
             ctx,    # [n_dms * n_cls, 16, 512]

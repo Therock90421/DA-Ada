@@ -44,9 +44,9 @@ DATASETS:
   TEST: ("cityscapes_voc_car_test",)
   #TEST: ("foggy_cityscapes_voc_test",)
 TEST:
-  EVAL_PERIOD: 1000 #2500
+  EVAL_PERIOD: 500 #2500
 SOLVER:
-  IMS_PER_BATCH: 2 #16
+  IMS_PER_BATCH: 8 #16
   BASE_LR: 0.002
   STEPS: (60000, 80000)
   MAX_ITER: 15000

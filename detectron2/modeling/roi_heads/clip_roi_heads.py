@@ -27,6 +27,37 @@ from .mask_head import build_mask_head
 from .roi_heads import ROI_HEADS_REGISTRY, select_foreground_proposals, ROIHeads
 from ..meta_arch.clip_rcnn import DAFeatDiscriminator
 
+# DI_PROMPT
+class MLP(nn.Module):
+    """Just  an MLP"""
+    def __init__(self, inplanes, outplanes):
+        super(MLP, self).__init__()
+        self.input = nn.Linear(inplanes, 512)
+        self.dropout = nn.Dropout(0.1)
+        self.hiddens = nn.ModuleList([
+            nn.Linear(512, 512)
+            for _ in range(1)])
+        self.output = nn.Linear(512, outplanes)
+        self.outplanes = outplanes
+        # depth 3   width 512   dropout 0.1
+
+    def forward(self, x):
+        x = self.input(x)
+        x = self.dropout(x)
+        x = F.relu(x)
+        for hidden in self.hiddens:
+            x = hidden(x)
+            x = self.dropout(x)
+            x = F.relu(x)
+        x = self.output(x)
+        return x
+
+    def initialize_xavier(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                torch.nn.init.xavier_uniform(m.weight)
+                m.bias.data.fill_(0.01)
+
 @ROI_HEADS_REGISTRY.register()
 class CLIPRes5ROIHeads(ROIHeads):
     """
@@ -72,11 +103,19 @@ class CLIPRes5ROIHeads(ROIHeads):
         self.head_dis = DAFeatDiscriminator(2048)
         ############################
         # lora prompt tuning
-        self.DAHead_di = self._make_prompt_layer(1792, 512 * 8)
-        self.DAHead_ds = self._make_prompt_layer(1792, 512 * 8)
+        #self.DAHead_di = self._make_prompt_layer(1792, 512 * 8)
+        #self.DAHead_ds = self._make_prompt_layer(1792, 512 * 8)
+        self.DAHead_di = MLP(1024, 512 * 8)
+        self.DAHead_di.initialize_xavier()
+        self.DAHead_ds = MLP(1024, 512 * 8)
+        self.DAHead_ds.initialize_xavier()
+        self.register_buffer('di_ema', torch.zeros(4096))
+        self.iter_count = 0
+
         self.pool_2 = nn.AvgPool2d(2)
         self.pool_4 = nn.AvgPool2d(4)
         self.global_pool = nn.AdaptiveAvgPool2d(1)
+        self.DAHead_dis = DAFeatDiscriminator(4096)
 
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -164,17 +203,35 @@ class CLIPRes5ROIHeads(ROIHeads):
         )
         ###################################
         # features for lora prompt tuning
-        x_di = torch.cat([self.pool_4(x_di['res2']), self.pool_2(x_di['res3']), x_di['res4']], dim=1) #[N, 1792, H/16, W/16]
-        x_ds = torch.cat([self.pool_4(x_ds['res2']), self.pool_2(x_ds['res3']), x_ds['res4']], dim=1)
-        x_di = self.DAHead_di(x_di) #[N, 512*8, H/16, W/16]
-        x_ds = self.DAHead_ds(x_ds) 
-        x_di = self._shared_roi_align([x_di], proposal_boxes)  #[512 * N, 4096, 14, 14]
-        x_ds = self._shared_roi_align([x_ds], proposal_boxes)
-        x_di = self.global_pool(x_di).mean(dim = 0).flatten()
-        x_ds = self.global_pool(x_ds).mean(dim = 0).flatten()
+        # x_di = torch.cat([self.pool_4(x_di['res2']), self.pool_2(x_di['res3']), x_di['res4']], dim=1) #[N, 1792, H/16, W/16]
+        # x_ds = torch.cat([self.pool_4(x_ds['res2']), self.pool_2(x_ds['res3']), x_ds['res4']], dim=1)
+        # x_di = self.DAHead_di(x_di) #[N, 512*8, H/16, W/16]
+        # x_ds = self.DAHead_ds(x_ds) 
+        # x_di = self._shared_roi_align([x_di], proposal_boxes)  #[512 * N, 4096, 14, 14]
+        # x_ds = self._shared_roi_align([x_ds], proposal_boxes)
+        # x_di = self.global_pool(x_di).mean(dim = 0).flatten()
+        # x_ds = self.global_pool(x_ds).mean(dim = 0).flatten()
         ###################################
         if attnpool:  # att pooling
             att_feats = attnpool(box_features)
+            ###########
+            x_di = att_feats.mean(dim = 0, keepdim = True)
+            x_di = self.DAHead_ds(x_di) #[1, 512 * 8]
+            x_di = x_di.flatten()
+            #x_di = self.DAHead(att_feats) #[512 * N, 512 * 8]
+            #x_di = x_di.mean(dim = 0).flatten()
+            x_ds = att_feats.mean(dim = 0, keepdim = True)
+            x_ds = self.DAHead_ds(x_ds) #[1, 512 * 8]
+            x_ds = x_ds.flatten()
+            #x_ds = x_di
+            if self.training:
+                self.iter_count += 1
+                alpha = min(1 - 1 / (self.iter_count + 1), 0.99)
+                #x_di = x_di / (1 + self.iter_count) + (self.di_ema * self.iter_count) / (1 + self.iter_count)
+                self.di_ema = x_di.detach() * (1 - alpha) + self.di_ema * alpha
+                #self.di_ema = x_di.detach()
+            else:
+                x_di = self.di_ema
             #predictions = self.box_predictor(att_feats)
             #predictions = self.box_predictor(att_feats)
             predictions = self.box_predictor(att_feats, x_di, x_ds)
@@ -188,6 +245,8 @@ class CLIPRes5ROIHeads(ROIHeads):
             ##############################
             del features
             losses = self.box_predictor.losses(predictions, proposals, is_source)
+            loss_di_0, loss_di_1 = self.DAHead_dis.loss(x_di.unsqueeze(0).unsqueeze(2).unsqueeze(3))
+            losses.update({'loss_di_0': loss_di_0, 'loss_di_1': loss_di_1})
             ##############################
             #losses.update({'loss_dis_head_0': loss_dis_head_0})
             #losses.update({'loss_dis_head_1': loss_dis_head_1})

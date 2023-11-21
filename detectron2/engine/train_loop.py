@@ -450,11 +450,27 @@ class DASimpleTrainer(TrainerBase):
         #del loss_dict_s['loss_dis_head_1']
         loss_dict_t = self.model(data_t, is_source = False)
         del loss_dict_t['loss_dis_0']
-        del loss_dict_s['loss_dis_1_0']
-        del loss_dict_s['loss_dis_2_0']
+        del loss_dict_t['loss_dis_1_0']
+        del loss_dict_t['loss_dis_2_0']
         #del loss_dict_t['loss_dis_head_0']
         del loss_dict_t['loss_cls']
         del loss_dict_t['loss_box_reg']
+        # print(loss_dict_s)
+        # print(loss_dict_t)
+        if self.is_prompt_tuning:
+            del loss_dict_s['loss_dis_0']
+            del loss_dict_s['loss_dis_1_0']
+            del loss_dict_s['loss_dis_2_0']
+            del loss_dict_t['loss_dis_1']
+            del loss_dict_t['loss_dis_1_1']
+            del loss_dict_t['loss_dis_2_1']
+            del loss_dict_s['loss_di_1']
+            del loss_dict_t['loss_di_0']
+        else:
+            del loss_dict_s['loss_di_0']
+            del loss_dict_s['loss_di_1']
+            del loss_dict_t['loss_di_0']
+            del loss_dict_t['loss_di_1']
         if isinstance(loss_dict_s, torch.Tensor):
             # 其实用不到
             losses_s = loss_dict_s

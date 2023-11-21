@@ -43,7 +43,7 @@ DATASETS:
   TRAIN_T: ("comic_voc_train",)
   TEST: ("comic_voc_test",)
 TEST:
-  EVAL_PERIOD: 2000 #5000
+  EVAL_PERIOD: 500 #5000
 SOLVER:
   IMS_PER_BATCH: 8 #16
   BASE_LR: 0.002

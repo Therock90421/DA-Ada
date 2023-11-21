@@ -935,9 +935,11 @@ class DAFeatDiscriminator(nn.Module):
                         stride=1,
                         padding=0))
             if i == 2:
-                self.norm.append(get_norm('SyncBN', chn_out))
+                #self.norm.append(get_norm('SyncBN', chn_out))
+                self.norm.append(get_norm('FrozenBN', chn_out))
                 break
-            self.norm.append(get_norm('GN', chn_out))
+            #self.norm.append(get_norm('GN', chn_out))
+            self.norm.append(get_norm('FrozenBN', chn_out))
 
     def init_weights(self):
         """Initialize weights of the head."""
@@ -972,7 +974,7 @@ class DAFeatDiscriminator(nn.Module):
     def loss(self, x):
         # feature domain classification loss
         dis_feat = torch.mean(self.extract_dis_feat(x))
-        dis_loss_0 = 3*self.mse(dis_feat, torch.tensor(0).cuda().float()) #10*self.mse(dis_feat, torch.tensor(0).cuda().float())
+        dis_loss_0 = self.mse(dis_feat, torch.tensor(0).cuda().float()) #10*self.mse(dis_feat, torch.tensor(0).cuda().float())
         if torch.isnan(dis_loss_0):
             print('dis_loss_0 is nan!')
             print(torch.any(torch.isnan(dis_feat)))
@@ -984,7 +986,7 @@ class DAFeatDiscriminator(nn.Module):
             #    print(torch.any(torch.isinf(param)))
         if torch.isinf(dis_loss_0):
             print('dis_loss_0 is inf!')
-        dis_loss_1 = 3*self.mse(dis_feat, torch.tensor(1).cuda().float()) #10*self.mse(dis_feat, torch.tensor(1).cuda().float())
+        dis_loss_1 = self.mse(dis_feat, torch.tensor(1).cuda().float()) #10*self.mse(dis_feat, torch.tensor(1).cuda().float())
         if torch.isnan(dis_loss_1):
             print('dis_loss_1 is nan!')
             print(torch.any(torch.isnan(dis_feat)))

@@ -357,12 +357,12 @@ class ModifiedResNet(Backbone):
             if i == 0:
                 temp = x
         #x = self.layer1(x) # det2 resnet50: [256, 200, 304]; CLIP resnet50: [256, 56, 56]
-        x = x + x_lora #self.relu(x + x_lora)
-        dis_feat['res2'] = x
-        diff = self.diff_layer1(temp - x)
-        ds_feat['res2'] = x * diff
-        x = x + x * diff
-        di_feat['res2'] = dis_feat['res2'] #x_lora
+        # x = x + x_lora #self.relu(x + x_lora)
+        # dis_feat['res2'] = x
+        # diff = self.diff_layer1(temp - x)
+        # ds_feat['res2'] = x * diff
+        # x = x + x * diff
+        # di_feat['res2'] = dis_feat['res2'] #x_lora
         outputs['res2'] = x if "res2" in self._out_features else None
         
         x_lora = self.lora_layer2(x)
@@ -371,12 +371,12 @@ class ModifiedResNet(Backbone):
             if i == 0:
                 temp = x
         #x = self.layer2(x) # det2 resnet50: [512, 100, 152]; CLIP resnet50: [512, 28, 28]
-        x = x + x_lora #self.relu(x + x_lora)
-        dis_feat['res3'] = x
-        diff = self.diff_layer2(temp - x)
-        ds_feat['res3'] = x * diff
-        x = x + x * diff
-        di_feat['res3'] = dis_feat['res3'] #x_lora
+        # x = x + x_lora #self.relu(x + x_lora)
+        # dis_feat['res3'] = x
+        # diff = self.diff_layer2(temp - x)
+        # ds_feat['res3'] = x * diff
+        # x = x + x * diff
+        # di_feat['res3'] = dis_feat['res3'] #x_lora
         outputs['res3'] = x if "res3" in self._out_features else None
 
 

@@ -3,16 +3,16 @@
 # RN50, COCO (Generalized: Novel + Base)
 python3 ./tools/train_net.py \
 --eval-only  \
---num-gpus 2 \
+--num-gpus 8 \
 --config-file ./configs/PascalVOC-Detection/da_clip_faster_rcnn_R_50_C4.yaml \
-MODEL.WEIGHTS ./output/model_55.5mAP.pth \
+MODEL.WEIGHTS ./output/model_lora_diff_tuning_58.4mAP.pth \
 MODEL.CLIP.OFFLINE_RPN_CONFIG ./configs/COCO-InstanceSegmentation/mask_rcnn_R_50_C4_1x_ovd_FSD.yaml \
 MODEL.CLIP.BB_RPN_WEIGHTS ./pretrained_ckpt/rpn/rpn_coco_48.pth \
 MODEL.CLIP.TEXT_EMB_PATH ./pretrained_ckpt/concept_emb/cityscapes_8_cls_emb.pth \
 MODEL.ROI_HEADS.SOFT_NMS_ENABLED True \
 LEARNABLE_PROMPT.CTX_SIZE 8 \
 LEARNABLE_PROMPT.LoRA True \
-LEARNABLE_PROMPT.TUNING False #True 
+LEARNABLE_PROMPT.TUNING True 
 
 
 # # RN50, COCO (only Novel)
