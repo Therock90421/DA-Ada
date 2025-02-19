@@ -1,3 +1,9 @@
+# DA-Ada: Learning Domain-Aware Adapter for Domain Adaptive Object Detection
+
+The official implementation of `DA-Ada: Learning Domain-Aware Adapter for Domain Adaptive Object Detection` ([Openreview](https://openreview.net/forum?id=hkEwwAqmCk)).
+
+This codebase is based on [RegionCLIP](https://github.com/microsoft/RegionCLIP).
+
 1. Put your dataset at './datasets/your_dataset'. Please follow the format of Pascal Voc.
    For example:
 
